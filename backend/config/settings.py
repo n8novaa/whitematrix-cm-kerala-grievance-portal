@@ -23,6 +23,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dev-only-change-me')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() == 'true'
@@ -47,6 +49,9 @@ INSTALLED_APPS = [
     'apps.accounts.apps.AccountsConfig',
     'apps.departments.apps.DepartmentsConfig',
     'apps.grievances.apps.GrievancesConfig',
+    'apps.ai_assistant.apps.AiAssistantConfig',
+    'apps.dashboard.apps.DashboardConfig',
+    'apps.enquiries.apps.EnquiriesConfig',
     # Register domain apps when their models are introduced in their milestones.
 ]
 

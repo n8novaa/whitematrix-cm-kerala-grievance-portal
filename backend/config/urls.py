@@ -22,4 +22,6 @@ urlpatterns = [
     path('api/v1/auth/', include('apps.accounts.urls')),
     path('api/v1/departments/', include('apps.departments.urls')),
     path('api/v1/grievances/', include('apps.grievances.urls')),
+    path('api/v1/ai/', include('apps.ai_assistant.urls')),
+    path('api/v1/dashboard/', include('apps.dashboard.urls')),
 ]
