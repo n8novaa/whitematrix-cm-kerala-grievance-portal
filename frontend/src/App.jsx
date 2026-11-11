@@ -1,122 +1,47 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useEffect, useState } from 'react'
+import { AuthProvider } from './AuthContext.jsx'
+import { useAuth } from './auth-context'
+import { Layout, Notice } from './components/Layout'
+import AuthPage from './pages/AuthPage'
+import CitizenDashboard from './pages/CitizenDashboard'
+import CMODashboard from './pages/CMODashboard'
+import OfficerDashboard from './pages/OfficerDashboard'
+import PublicPages from './pages/PublicPages'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+function Application() {
+  const { user, loading } = useAuth()
+  const [page, setPage] = useState(window.location.pathname.replace(/\/$/, '') || '/')
+  function navigate(path) {
+    window.history.pushState({}, '', path)
+    setPage(path)
+    window.scrollTo(0, 0)
+  }
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+  useEffect(() => {
+    function onPopState() { setPage(window.location.pathname.replace(/\/$/, '') || '/') }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
-      <div className="ticks"></div>
+  const protectedPage = ['/dashboard', '/submit'].includes(page)
+  const route = user && ['/sign-in', '/register'].includes(page) ? '/dashboard'
+    : user && page === '/submit' && user.role !== 'CITIZEN' ? '/dashboard' : page
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+  let content
+  if (loading) content = <div className="app-loading" role="status">Restoring your session…</div>
+  else if (protectedPage && !user) content = <AuthPage mode="login" onSuccess={() => navigate('/dashboard')} />
+  else if (route === '/sign-in' || route === '/register') content = <AuthPage mode={route === '/register' ? 'register' : 'login'} onSuccess={() => navigate('/dashboard')} />
+  else if (route === '/dashboard' && user?.role === 'CITIZEN') content = <CitizenDashboard />
+  else if (route === '/submit' && user?.role === 'CITIZEN') content = <CitizenDashboard initialMode="submit" />
+  else if (route === '/dashboard' && user?.role === 'CMO') content = <CMODashboard />
+  else if (route === '/dashboard' && user?.role === 'OFFICER') content = <OfficerDashboard />
+  else if (route === '/dashboard') content = <Notice kind="error">This account role is not enabled for a workspace.</Notice>
+  else content = <PublicPages page={route} user={user} />
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+  return <Layout><div key={route} className="page-shell">{content ?? <div className="content-wrap"><h1>Page not found</h1><a className="button" href="/">Return home</a></div>}</div></Layout>
 }
 
-export default App
+export default function App() {
+  return <AuthProvider><Application /></AuthProvider>
+}

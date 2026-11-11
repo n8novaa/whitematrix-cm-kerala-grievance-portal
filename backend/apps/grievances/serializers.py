@@ -1,7 +1,7 @@
 from pathlib import Path
 from django.db import transaction
 from rest_framework import serializers
-from .models import ActionTakenReport, Attachment, Grievance, GrievanceHistory
+from .models import ActionTakenReport, Attachment, CitizenFeedback, DepartmentAssignment, Grievance, GrievanceHistory
 
 MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf'}
@@ -58,10 +58,12 @@ class GrievanceSerializer(serializers.ModelSerializer):
     history = serializers.SerializerMethodField()
     attachments = AttachmentSerializer(many=True, read_only=True)
     action_reports = serializers.SerializerMethodField()
+    assignment = serializers.SerializerMethodField()
+    feedback = serializers.SerializerMethodField()
 
     class Meta:
         model = Grievance
-        fields = ('id', 'reference_number', 'category', 'subject', 'description', 'priority', 'status', 'department', 'department_name', 'created_at', 'updated_at', 'history', 'attachments', 'action_reports')
+        fields = ('id', 'reference_number', 'district', 'category', 'subject', 'description', 'priority', 'status', 'department', 'department_name', 'created_at', 'updated_at', 'history', 'attachments', 'action_reports', 'assignment', 'feedback')
         read_only_fields = ('id', 'reference_number', 'priority', 'status', 'department', 'created_at', 'updated_at')
 
     def get_history(self, obj):
@@ -79,11 +81,42 @@ class GrievanceSerializer(serializers.ModelSerializer):
             reports = reports.filter(officer=request.user)
         return ActionTakenReportSerializer(reports.order_by('created_at'), many=True).data
 
+    def get_assignment(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or request.user.role not in ('CMO', 'OFFICER'):
+            return None
+        assignments = DepartmentAssignment.objects.filter(grievance=obj, is_active=True).select_related('department', 'officer')
+        if request.user.role == 'OFFICER':
+            assignments = assignments.filter(officer=request.user)
+        assignment = assignments.order_by('-assigned_at', '-pk').first()
+        if not assignment:
+            return None
+        return {
+            'department_id': assignment.department_id,
+            'department_name': assignment.department.name,
+            'officer_id': assignment.officer_id,
+            'officer_name': assignment.officer.get_full_name() if assignment.officer else '',
+            'officer_email': assignment.officer.email if assignment.officer else '',
+            'remarks': assignment.remarks,
+            'assigned_at': assignment.assigned_at,
+        }
+
+    def get_feedback(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or request.user.role != 'CITIZEN' or obj.citizen_id != request.user.pk:
+            return None
+        try:
+            feedback = obj.feedback
+        except CitizenFeedback.DoesNotExist:
+            return None
+        return {'rating': feedback.rating, 'comments': feedback.comments, 'created_at': feedback.created_at}
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if self.context.get('tracking'):
             data.pop('description', None)
             data.pop('attachments', None)
+            data.pop('feedback', None)
         return data
 
     def create(self, validated_data):

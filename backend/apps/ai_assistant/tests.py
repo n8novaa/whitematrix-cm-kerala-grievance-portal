@@ -26,6 +26,18 @@ class GrievanceAnalysisAPITests(APITestCase):
 
     @override_settings(GEMINI_API_KEY='test-key')
     @patch('apps.ai_assistant.views.genai.Client')
+    def test_valid_ai_output_is_returned_as_advisory_only(self, client_factory):
+        department = Department.objects.create(name='Public Works', code='PWD', description='Roads')
+        client_factory.return_value.models.generate_content.return_value.text = '{"department_code":"PWD","category":"Roads","priority":"HIGH","summary":"A road hazard requires inspection."}'
+        self.client.force_authenticate(self.citizen)
+        response = self.client.post('/api/v1/ai/analyze/', self.payload)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data['advisory'])
+        self.assertEqual(response.data['department_code'], department.code)
+        self.assertEqual(response.data['priority'], 'HIGH')
+
+    @override_settings(GEMINI_API_KEY='test-key')
+    @patch('apps.ai_assistant.views.genai.Client')
     def test_provider_exception_returns_gateway_error_without_leaking_details(self, client_factory):
         client_factory.return_value.models.generate_content.side_effect = RuntimeError('private provider diagnostic')
         self.client.force_authenticate(self.citizen)

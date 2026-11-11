@@ -25,6 +25,7 @@ class Grievance(models.Model):
 
     reference_number = models.CharField(max_length=20, unique=True, default=create_reference_number, editable=False)
     citizen = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='grievances')
+    district = models.CharField(max_length=80, blank=True)
     department = models.ForeignKey(Department, null=True, blank=True, on_delete=models.PROTECT, related_name='grievances')
     category = models.CharField(max_length=80)
     subject = models.CharField(max_length=200)

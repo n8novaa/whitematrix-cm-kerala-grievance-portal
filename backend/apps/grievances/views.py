@@ -106,7 +106,7 @@ class AssignmentInputSerializer(serializers.Serializer):
         except Department.DoesNotExist:
             raise serializers.ValidationError({'department_id': 'Select an active department.'})
         try:
-            attrs['officer'] = User.objects.get(pk=attrs['officer_id'], role=User.Role.OFFICER, department=attrs['department'])
+            attrs['officer'] = User.objects.get(pk=attrs['officer_id'], role=User.Role.OFFICER, department=attrs['department'], is_active=True)
         except User.DoesNotExist:
             raise serializers.ValidationError({'officer_id': 'Select an officer in the chosen department.'})
         return attrs
@@ -120,12 +120,14 @@ class AssignGrievanceView(APIView):
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             grievance = get_object_or_404(Grievance.objects.select_for_update(), pk=pk)
+            if grievance.status == Grievance.Status.RESOLVED:
+                raise serializers.ValidationError({'status': 'Resolved grievances cannot be reassigned.'})
             data = serializer.validated_data
             grievance.department = data['department']
             grievance.save(update_fields=('department', 'updated_at'))
             grievance.assignments.filter(is_active=True).update(is_active=False)
             DepartmentAssignment.objects.create(grievance=grievance, department=data['department'], officer=data['officer'], assigned_by=request.user, remarks=data.get('remarks', ''))
-            if grievance.status in (Grievance.Status.SUBMITTED, Grievance.Status.UNDER_REVIEW):
+            if grievance.status in (Grievance.Status.SUBMITTED, Grievance.Status.UNDER_REVIEW, Grievance.Status.REOPENED):
                 transition(grievance, Grievance.Status.IN_PROGRESS, request.user, data.get('remarks', ''), internal=True)
         return Response(GrievanceSerializer(grievance, context={'request': request}).data)
 
@@ -146,10 +148,18 @@ class SubmitActionReportView(APIView):
     permission_classes = (IsOfficer,)
 
     def post(self, request, pk):
-        grievance = get_object_or_404(Grievance, pk=pk, assignments__officer=request.user, assignments__is_active=True)
         serializer = ActionReportInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        report = ActionTakenReport.objects.create(grievance=grievance, officer=request.user, report=serializer.validated_data['report'])
+        with transaction.atomic():
+            grievance = get_object_or_404(
+                Grievance.objects.select_for_update(),
+                pk=pk,
+                assignments__officer=request.user,
+                assignments__is_active=True,
+            )
+            if grievance.status == Grievance.Status.RESOLVED:
+                raise serializers.ValidationError({'status': 'Resolved grievances cannot receive new reports.'})
+            report = ActionTakenReport.objects.create(grievance=grievance, officer=request.user, report=serializer.validated_data['report'])
         return Response({'id': report.pk, 'review_status': report.review_status, 'created_at': report.created_at}, status=201)
 
 
@@ -165,6 +175,8 @@ class OfficerProgressUpdateView(APIView):
                 assignments__officer=request.user,
                 assignments__is_active=True,
             )
+            if grievance.status == Grievance.Status.RESOLVED:
+                raise serializers.ValidationError({'status': 'Resolved grievances cannot receive progress updates.'})
             history = GrievanceHistory.objects.create(
                 grievance=grievance,
                 previous_status=grievance.status,
