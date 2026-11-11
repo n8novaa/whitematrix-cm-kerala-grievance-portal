@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'apps.accounts.apps.AccountsConfig',
     'apps.departments.apps.DepartmentsConfig',
+    'apps.grievances.apps.GrievancesConfig',
     # Register domain apps when their models are introduced in their milestones.
 ]
 
