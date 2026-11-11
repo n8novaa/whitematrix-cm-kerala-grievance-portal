@@ -20,15 +20,7 @@ python manage.py runserver
 
 The copied `.env` file is loaded by Django. The local SQLite database is used while `DATABASE_URL` is empty. Set `DJANGO_SECRET_KEY` to a random value outside development. Set `GEMINI_API_KEY` to enable real AI suggestions; without it, the endpoint returns an explicit unavailable response and grievance submission still works.
 
-Public registration creates citizen accounts. To provision local CMO and officer accounts, use Django shell with test-only credentials:
-
-```python
-from apps.accounts.models import User
-from apps.departments.models import Department
-
-User.objects.create_user(email="cmo@example.test", password="replace-this-test-password", role=User.Role.CMO)
-User.objects.create_user(email="officer@example.test", password="replace-this-test-password", role=User.Role.OFFICER, department=Department.objects.get(code="PWD"))
-```
+Public registration creates citizen accounts only. See [the local role setup](DOCUMENTATION/06_Setup_and_Testing.md#local-test-roles) for secure CMO/officer account creation with operator-chosen test passwords.
 
 ### Frontend
 
@@ -50,4 +42,8 @@ Vite proxies `/api` to `http://127.0.0.1:8000` during local development. For sep
 - `/api/v1/ai/analyze/` — advisory AI analysis; it never routes or resolves a grievance
 - `/api/v1/dashboard/cmo/statistics/` — CMO case counts
 
-See [HANDOFF.md](HANDOFF.md) for implementation status, verification results, and remaining release work.
+## Documentation
+
+The [documentation index](DOCUMENTATION/01_Project_Overview.md) links to project overview, architecture, database/ER diagram, API reference, AI integration, setup/testing, and role guides. [Deployment readiness](DOCUMENTATION/08_Deployment_Readiness.md) lists configuration and manual checks still needed; this repository has not been deployed.
+
+See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for the current phase checkpoint and [HANDOFF.md](HANDOFF.md) for repository history and demo verification.

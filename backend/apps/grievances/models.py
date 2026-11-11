@@ -7,7 +7,7 @@ from apps.departments.models import Department
 
 def create_reference_number():
     year = timezone.now().year
-    return f'CMK-{year}-{secrets.token_hex(4).upper()}'
+    return f'CMK-{year}-{secrets.token_hex(16).upper()}'
 
 
 class Grievance(models.Model):
@@ -23,7 +23,7 @@ class Grievance(models.Model):
         MEDIUM = 'MEDIUM', 'Medium'
         HIGH = 'HIGH', 'High'
 
-    reference_number = models.CharField(max_length=20, unique=True, default=create_reference_number, editable=False)
+    reference_number = models.CharField(max_length=48, unique=True, default=create_reference_number, editable=False)
     citizen = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='grievances')
     district = models.CharField(max_length=80, blank=True)
     department = models.ForeignKey(Department, null=True, blank=True, on_delete=models.PROTECT, related_name='grievances')
@@ -101,6 +101,30 @@ class CitizenFeedback(models.Model):
 
     class Meta:
         constraints = [models.CheckConstraint(condition=models.Q(rating__gte=1, rating__lte=5), name='feedback_rating_1_to_5')]
+
+
+class GrievanceEscalation(models.Model):
+    grievance = models.ForeignKey(Grievance, on_delete=models.CASCADE, related_name='escalations')
+    reason = models.TextField()
+    raised_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='grievance_escalations')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AIRecommendation(models.Model):
+    class Decision(models.TextChoices):
+        PENDING = 'PENDING', 'Pending review'
+        ACCEPTED = 'ACCEPTED', 'Accepted'
+        OVERRIDDEN = 'OVERRIDDEN', 'Overridden'
+
+    grievance = models.OneToOneField(Grievance, on_delete=models.CASCADE, related_name='ai_recommendation')
+    department = models.ForeignKey(Department, null=True, blank=True, on_delete=models.SET_NULL, related_name='ai_recommendations')
+    category = models.CharField(max_length=80)
+    priority = models.CharField(max_length=10, choices=Grievance.Priority.choices)
+    summary = models.CharField(max_length=500)
+    decision = models.CharField(max_length=12, choices=Decision.choices, default=Decision.PENDING)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='reviewed_ai_recommendations')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class ContactEnquiry(models.Model):

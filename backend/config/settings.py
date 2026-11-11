@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from pathlib import Path
 from decouple import config as env
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,14 +22,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = env('DJANGO_SECRET_KEY', default='dev-only-change-me')
+DEBUG = env('DJANGO_DEBUG', default=False, cast=bool)
+SECRET_KEY = env('DJANGO_SECRET_KEY', default='')
+if not SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DJANGO_SECRET_KEY must be configured.')
 GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
 GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-2.5-flash')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env('DJANGO_DEBUG', default=True, cast=bool)
-
-ALLOWED_HOSTS = env('DJANGO_ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=lambda value: [host.strip() for host in value.split(',')])
+ALLOWED_HOSTS = env('DJANGO_ALLOWED_HOSTS', default='localhost,127.0.0.1' if DEBUG else '', cast=lambda value: [host.strip() for host in value.split(',') if host.strip()])
+if not ALLOWED_HOSTS:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DJANGO_ALLOWED_HOSTS must list the deployed hostnames when DEBUG is False.')
 AUTH_USER_MODEL = 'accounts.User'
 
 
@@ -57,6 +62,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -96,9 +102,9 @@ if DATABASE_URL:
         raise ValueError('DATABASE_URL must use PostgreSQL (postgres:// or postgresql://).')
     DATABASES = {'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': parsed_database_url.path.lstrip('/'),
-        'USER': parsed_database_url.username or '',
-        'PASSWORD': parsed_database_url.password or '',
+        'NAME': unquote(parsed_database_url.path.lstrip('/')),
+        'USER': unquote(parsed_database_url.username or ''),
+        'PASSWORD': unquote(parsed_database_url.password or ''),
         'HOST': parsed_database_url.hostname or '',
         'PORT': parsed_database_url.port or '',
         'OPTIONS': {'sslmode': 'require'} if parsed_database_url.query.find('sslmode=require') >= 0 else {},
@@ -144,23 +150,46 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = Path(env('DJANGO_MEDIA_ROOT', default=str(BASE_DIR / 'media')))
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATIC_URL = 'static/'
-CORS_ALLOWED_ORIGINS = env('CORS_ALLOWED_ORIGINS', default='http://localhost:5173', cast=lambda value: [origin.strip() for origin in value.split(',')])
+CORS_ALLOWED_ORIGINS = env('CORS_ALLOWED_ORIGINS', default='http://localhost:5173' if DEBUG else '', cast=lambda value: [origin.strip() for origin in value.split(',') if origin.strip()])
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
+}
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ('rest_framework_simplejwt.authentication.JWTAuthentication',),
     'DEFAULT_PERMISSION_CLASSES': ('rest_framework.permissions.IsAuthenticated',),
+    'DEFAULT_THROTTLE_RATES': {
+        'auth': '10/min',
+        'tracking': '30/hour',
+        'ai_analysis': '10/hour',
+        'public_form': '10/hour',
+    },
+    'NUM_PROXIES': env('API_NUM_PROXIES', default=1, cast=int),
 }
 from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=env('JWT_ACCESS_MINUTES', default=30, cast=int)),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=env('JWT_REFRESH_DAYS', default=7, cast=int)),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=env('JWT_ACCESS_MINUTES', default=15, cast=int)),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=env('JWT_REFRESH_DAYS', default=1, cast=int)),
     'AUTH_HEADER_TYPES': ('Bearer',),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
 }
+
+SECURE_SSL_REDIRECT = not DEBUG and env('SECURE_SSL_REDIRECT', default=True, cast=bool)
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+SECURE_REFERRER_POLICY = 'same-origin'
+SECURE_HSTS_SECONDS = env('SECURE_HSTS_SECONDS', default=31536000 if not DEBUG else 0, cast=int)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if env('TRUST_PROXY_SSL_HEADER', default=False, cast=bool) else None
 
 
 # Email

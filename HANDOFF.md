@@ -2,28 +2,31 @@
 
 ## Current checkpoint
 
-- Backend workflow APIs and role permissions were committed as `cbf4c51` (`feat: complete grievance role workflow APIs`). The frontend and final integration refinements are being validated for the next commit.
-- Implemented email/JWT authentication, public departments, citizen grievance creation/list/detail/tracking, private attachments, status history, CMO queue/statistics/assignment, officer active assignment queue/progress/action reports, CMO report accept/return and resolution, citizen reopening/feedback, contact enquiries, and advisory Gemini analysis.
-- Citizen responses and public tracking exclude internal history, assignment notes, officer reports, and feedback. Officers lose access when their active assignment is replaced. Resolved grievances reject new assignment, progress updates, and action reports.
-- Frontend includes the public prototype pages, auth and token refresh, role-protected workspaces, grievance submission/tracking, CMO review, officer reporting, and AI suggestion review. The AI panel labels suggestions as advisory and keeps them separate from the values submitted by the citizen.
+The prototype implementation is complete through the requested workflow and documentation scope. Backend/API changes and frontend role workspaces are committed in earlier milestones (`cbf4c51`, `878a9c0`); the current stabilization, integration, security, and documentation milestone is being finalized separately. No commit has been amended or pushed.
 
-## Verification completed
+The app supports public information pages and disclaimer; citizen registration/login, grievance submission, tracking, history, attachments, feedback and reopening; CMO queue, filters, district statistics, assignment, review, report acceptance/return, resolution, escalations, and AI recommendation decisions; and officer assigned queue, progress updates, and action-taken reports. AI values remain suggestions until a CMO records an accept/override decision.
 
-- Backend Django check: passed.
-- Full backend suite: **35 tests passed** (after final validation; development JWT key emits the expected short-key warning unless `DJANGO_SECRET_KEY` is configured).
-- Frontend `npm run lint`: passed.
-- Frontend `npm run build`: passed.
-- Local browser walkthrough: citizen submission and tracking → CMO assignment → officer progress and report → CMO accept and resolve → citizen feedback and reopen. AI unavailable handling was confirmed with no Gemini key configured.
+Citizen-facing details omit internal remarks, assignment instructions, reports, and escalations. CMO review of reports is transactional, with status/history changes kept together. Sensitive endpoints are throttled; uploads are constrained by size, extension, MIME, and file signature. Reference IDs use 128 bits of randomness.
 
-## Remaining before release
+## Verification
 
-- Configure a real Gemini API key to verify live model behavior; no key is stored in the repository.
-- Provision test-only CMO/officer accounts in the target environment; public registration intentionally creates citizens only.
-- Complete the requested `DOCUMENTATION/` guides, architecture/ER diagrams, and demo evidence.
-- Configure the production database, persistent media storage, `VITE_API_BASE_URL`, CORS, and deployment secrets; deploy and verify the hosted URL in a clean session.
-- The current list endpoints are suitable for prototype-scale demo data; add pagination before production-scale use.
+- Full backend suite: 48 tests passed.
+- Django system checks passed; migration drift check passed.
+- Production configuration `check --deploy` passed with placeholder deployment settings; static asset collection completed.
+- Frontend lint and production build passed.
+- Browser walkthrough verified CMO reopened-case review, public update and escalation, citizen view without internal notes, and officer progress update.
+- No live Gemini credential or hosted infrastructure was available; those integrations were not represented as verified.
+
+## Remaining before production
+
+- Set real per-environment secrets, database, CORS origins, frontend API URL, persistent media, and shared cache. DRF's default in-process throttle cache does not coordinate across multiple workers.
+- JWT access/refresh tokens are stored in localStorage; harden the browser threat model and consider HttpOnly cookies before production exposure.
+- Configure a Gemini credential and validate the live provider flow. AI failure is handled without blocking grievance submission.
+- Provision CMO/officer accounts through a trusted administrative process; public registration only creates citizens.
+- Deploy to hosting and verify the hosted URL, migrations, static/media handling, and role workflows in a clean environment.
 
 ## Repository notes
 
-- No changes were pushed to GitHub. Existing user worktree change to `AGENTS.md` remains unstaged and excluded from commits.
-- `backend/backend.zip` was left untouched and excluded from commits.
+- The user’s `AGENTS.md` worktree deletion is preserved and excluded from commits.
+- `backend/backend.zip` and `frontend/frontend.zip` are preserved and excluded from commits.
+- No changes were pushed to GitHub.

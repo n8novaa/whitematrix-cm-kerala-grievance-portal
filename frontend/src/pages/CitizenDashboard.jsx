@@ -30,6 +30,7 @@ function GrievanceForm({ onCreated }) {
     try {
       const payload = new FormData()
       Object.entries(form).forEach(([key, value]) => payload.append(key, value))
+      if (suggestion?.recommendation_token) payload.append('ai_recommendation_token', suggestion.recommendation_token)
       files.forEach((file) => payload.append('attachments', file))
       const result = await api('/grievances/', { method: 'POST', body: payload })
       setNotice(`Grievance submitted. Your reference number is ${result.reference_number}.`)

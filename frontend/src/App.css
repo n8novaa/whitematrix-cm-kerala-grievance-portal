@@ -208,6 +208,8 @@ td small { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .department-summary > div { display: flex; justify-content: space-between; margin-top: 7px; color: #52636a; font-size: 10px; }
 .department-summary strong { color: var(--ink); }
 .queue-filters { display: flex; align-items: end; gap: 9px; }
+.checkbox-label { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; margin: 0 0 10px; }
+.checkbox-label input { width: 16px; min-height: 16px; margin: 0; }
 .review-panel { width: min(640px, 100%); }
 .detail-panel { width: min(560px, 100%); height: 100%; overflow-y: auto; padding: 26px; background: #fff; box-shadow: -12px 0 35px rgba(10, 37, 39, .14); }
 .drawer-backdrop { position: fixed; z-index: 20; inset: 0; display: flex; justify-content: end; background: rgba(19, 39, 41, .42); }

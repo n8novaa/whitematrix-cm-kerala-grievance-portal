@@ -1,7 +1,10 @@
 from pathlib import Path
+import hashlib
+from django.core import signing
 from django.db import transaction
 from rest_framework import serializers
-from .models import ActionTakenReport, Attachment, CitizenFeedback, DepartmentAssignment, Grievance, GrievanceHistory
+from apps.departments.models import Department
+from .models import AIRecommendation, ActionTakenReport, Attachment, CitizenFeedback, DepartmentAssignment, Grievance, GrievanceHistory
 
 MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf'}
@@ -21,15 +24,27 @@ class AttachmentInputSerializer(serializers.ModelSerializer):
         if extension not in ALLOWED_EXTENSIONS:
             raise serializers.ValidationError('Only JPG, PNG, and PDF files are allowed.')
         expected_types = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.pdf': 'application/pdf'}
+        signatures = {
+            '.jpg': (lambda head: head.startswith(b'\xff\xd8\xff')),
+            '.jpeg': (lambda head: head.startswith(b'\xff\xd8\xff')),
+            '.png': (lambda head: head.startswith(b'\x89PNG\r\n\x1a\n')),
+            '.pdf': (lambda head: head.startswith(b'%PDF-')),
+        }
+        head = value.read(16)
+        value.seek(0)
+        if not signatures[extension](head):
+            raise serializers.ValidationError('File content does not match an allowed file type.')
         if getattr(value, 'content_type', None) not in (None, expected_types[extension]):
             raise serializers.ValidationError('File content type does not match its extension.')
         return value
 
 
 class GrievanceHistorySerializer(serializers.ModelSerializer):
+    responsible_user_role = serializers.CharField(source='responsible_user.role', read_only=True, allow_null=True)
+
     class Meta:
         model = GrievanceHistory
-        fields = ('previous_status', 'new_status', 'remarks', 'created_at')
+        fields = ('previous_status', 'new_status', 'remarks', 'created_at', 'responsible_user_role')
 
 
 class ActionTakenReportSerializer(serializers.ModelSerializer):
@@ -60,10 +75,12 @@ class GrievanceSerializer(serializers.ModelSerializer):
     action_reports = serializers.SerializerMethodField()
     assignment = serializers.SerializerMethodField()
     feedback = serializers.SerializerMethodField()
+    ai_recommendation = serializers.SerializerMethodField()
+    ai_recommendation_token = serializers.CharField(write_only=True, required=False)
 
     class Meta:
         model = Grievance
-        fields = ('id', 'reference_number', 'district', 'category', 'subject', 'description', 'priority', 'status', 'department', 'department_name', 'created_at', 'updated_at', 'history', 'attachments', 'action_reports', 'assignment', 'feedback')
+        fields = ('id', 'reference_number', 'district', 'category', 'subject', 'description', 'priority', 'status', 'department', 'department_name', 'created_at', 'updated_at', 'history', 'attachments', 'action_reports', 'assignment', 'feedback', 'ai_recommendation', 'ai_recommendation_token')
         read_only_fields = ('id', 'reference_number', 'priority', 'status', 'department', 'created_at', 'updated_at')
 
     def get_history(self, obj):
@@ -111,6 +128,24 @@ class GrievanceSerializer(serializers.ModelSerializer):
             return None
         return {'rating': feedback.rating, 'comments': feedback.comments, 'created_at': feedback.created_at}
 
+    def get_ai_recommendation(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or request.user.role != 'CMO':
+            return None
+        try:
+            recommendation = obj.ai_recommendation
+        except AIRecommendation.DoesNotExist:
+            return None
+        return {
+            'department_id': recommendation.department_id,
+            'department_name': recommendation.department.name if recommendation.department else None,
+            'category': recommendation.category,
+            'priority': recommendation.priority,
+            'summary': recommendation.summary,
+            'decision': recommendation.decision,
+            'reviewed_at': recommendation.reviewed_at,
+        }
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if self.context.get('tracking'):
@@ -121,6 +156,19 @@ class GrievanceSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context['request']
+        token = validated_data.pop('ai_recommendation_token', None)
+        recommendation_data = None
+        if token:
+            try:
+                recommendation_data = signing.loads(token, salt='grievance-ai-recommendation', max_age=1800)
+            except (signing.BadSignature, signing.SignatureExpired) as exc:
+                raise serializers.ValidationError({'ai_recommendation_token': 'AI suggestion token is invalid or expired.'}) from exc
+            description_hash = hashlib.sha256(validated_data['description'].encode()).hexdigest()
+            if recommendation_data.get('description_hash') != description_hash:
+                raise serializers.ValidationError({'ai_recommendation_token': 'AI suggestions must match this grievance description.'})
+            department = Department.objects.filter(code=recommendation_data.get('department_code'), is_active=True).first()
+            if not department or recommendation_data.get('priority') not in Grievance.Priority.values or not isinstance(recommendation_data.get('category'), str) or not isinstance(recommendation_data.get('summary'), str):
+                raise serializers.ValidationError({'ai_recommendation_token': 'AI suggestion contains invalid values.'})
         files = request.FILES.getlist('attachments')
         validated_files = []
         for upload in files:
@@ -130,6 +178,15 @@ class GrievanceSerializer(serializers.ModelSerializer):
         with transaction.atomic():
             grievance = Grievance.objects.create(citizen=request.user, **validated_data)
             GrievanceHistory.objects.create(grievance=grievance, new_status=grievance.status, responsible_user=request.user)
+            if recommendation_data:
+                from .models import AIRecommendation
+                AIRecommendation.objects.create(
+                    grievance=grievance,
+                    department=department,
+                    category=recommendation_data['category'][:80],
+                    priority=recommendation_data['priority'],
+                    summary=recommendation_data['summary'][:500],
+                )
             for file in validated_files:
                 Attachment.objects.create(grievance=grievance, file=file, original_name=Path(file.name).name, content_type=getattr(file, 'content_type', 'application/octet-stream'), size=file.size)
         return grievance

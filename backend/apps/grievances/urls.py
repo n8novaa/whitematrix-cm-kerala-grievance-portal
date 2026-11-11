@@ -1,8 +1,8 @@
 from django.urls import path
 from .views import (AttachmentDownloadView, AssignGrievanceView, CitizenGrievanceDetailView,
     CitizenGrievanceListCreateView, CMOGrievanceQueueView, CMOResolveView,
-    OfficerQueueView, OfficerProgressUpdateView, SubmitActionReportView, TrackGrievanceView, CMOReportReviewView,
-    CitizenReopenView, CitizenFeedbackView, ContactEnquiryView)
+    OfficerQueueView, OfficerProgressUpdateView, SubmitActionReportView, TrackGrievanceView, CMOReportReviewView, CMOReviewGrievanceView,
+    CitizenReopenView, CitizenFeedbackView, ContactEnquiryView, EscalateGrievanceView, AIRecommendationDecisionView)
 
 urlpatterns = [
     path('', CitizenGrievanceListCreateView.as_view(), name='grievance-list-create'),
@@ -10,6 +10,9 @@ urlpatterns = [
     path('<int:pk>/', CitizenGrievanceDetailView.as_view(), name='grievance-detail'),
     path('<int:grievance_id>/attachments/<int:attachment_id>/', AttachmentDownloadView.as_view(), name='grievance-attachment'),
     path('cmo/queue/', CMOGrievanceQueueView.as_view(), name='cmo-grievance-queue'),
+    path('<int:pk>/cmo/review/', CMOReviewGrievanceView.as_view(), name='grievance-cmo-review'),
+    path('<int:pk>/escalations/', EscalateGrievanceView.as_view(), name='grievance-escalations'),
+    path('<int:pk>/ai-recommendation/decision/', AIRecommendationDecisionView.as_view(), name='ai-recommendation-decision'),
     path('<int:pk>/assign/', AssignGrievanceView.as_view(), name='grievance-assign'),
     path('officer/queue/', OfficerQueueView.as_view(), name='officer-grievance-queue'),
     path('<int:pk>/action-reports/', SubmitActionReportView.as_view(), name='action-report-submit'),

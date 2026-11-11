@@ -2,7 +2,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from rest_framework.test import APITestCase
 from apps.accounts.models import User
-from .models import ActionTakenReport, Attachment, DepartmentAssignment, Grievance, GrievanceHistory
+from .models import AIRecommendation, ActionTakenReport, Attachment, DepartmentAssignment, Grievance, GrievanceHistory
 from apps.departments.models import Department
 import tempfile
 
@@ -21,7 +21,7 @@ class CitizenGrievanceAPITests(APITestCase):
         response = self.client.post('/api/v1/grievances/', self.payload(), format='json')
         self.assertEqual(response.status_code, 201, response.data)
         grievance = Grievance.objects.get()
-        self.assertRegex(grievance.reference_number, r'^CMK-\d{4}-[A-F0-9]{8}$')
+        self.assertRegex(grievance.reference_number, r'^CMK-\d{4}-[A-F0-9]{32}$')
         self.assertEqual(grievance.citizen, self.citizen)
         self.assertEqual(grievance.history.count(), 1)
         self.assertEqual(response.data['reference_number'], grievance.reference_number)
@@ -40,8 +40,105 @@ class CitizenGrievanceAPITests(APITestCase):
         response = self.client.get(f'/api/v1/grievances/track/{grievance.reference_number}/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['history']), 1)
+        self.assertEqual(response.data['history'][0]['responsible_user_role'], User.Role.CITIZEN)
         self.assertNotIn('Private', str(response.data))
         self.assertNotIn('description', response.data)
+
+    def test_cmo_can_move_submitted_grievance_to_under_review(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
+        cmo = User.objects.create_user(email='review-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        self.client.force_authenticate(cmo)
+        response = self.client.post(f'/api/v1/grievances/{grievance.pk}/cmo/review/', {'remarks': 'Initial review started.'})
+        self.assertEqual(response.status_code, 200, response.data)
+        grievance.refresh_from_db()
+        entry = grievance.history.get()
+        self.assertEqual(grievance.status, Grievance.Status.UNDER_REVIEW)
+        self.assertEqual(entry.responsible_user, cmo)
+        self.assertTrue(entry.is_internal)
+
+    def test_officer_and_citizen_cannot_start_cmo_review_or_publish_unassigned_updates(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
+        officer = User.objects.create_user(email='review-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER)
+        self.client.force_authenticate(officer)
+        self.assertEqual(self.client.post(f'/api/v1/grievances/{grievance.pk}/cmo/review/').status_code, 403)
+        self.assertEqual(self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Unauthorized public update', 'is_public': True}).status_code, 404)
+        self.client.force_authenticate(self.citizen)
+        self.assertEqual(self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Citizen writes public update', 'is_public': True}).status_code, 403)
+
+    def test_officer_can_publish_citizen_visible_progress_without_leaking_private_notes(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
+        department = Department.objects.create(name='Public Works', code='PUB', description='Roads')
+        officer = User.objects.create_user(email='public-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=department)
+        cmo = User.objects.create_user(email='public-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        DepartmentAssignment.objects.create(grievance=grievance, department=department, officer=officer, assigned_by=cmo)
+        self.client.force_authenticate(officer)
+        response = self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Inspection visit scheduled for tomorrow.', 'is_public': True})
+        self.assertEqual(response.status_code, 201, response.data)
+        tracked = self.client.get(f'/api/v1/grievances/track/{grievance.reference_number}/')
+        self.assertIn('Inspection visit scheduled for tomorrow.', str(tracked.data))
+        self.assertIn('OFFICER', str(tracked.data))
+
+    def test_cmo_accepts_ai_suggestion_as_audited_official_values(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
+        department = Department.objects.create(name='Public Works', code='AIP', description='Roads')
+        recommendation = AIRecommendation.objects.create(grievance=grievance, department=department, category='Road Safety', priority='HIGH', summary='Inspect roadway hazard.')
+        cmo = User.objects.create_user(email='ai-decision-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        self.client.force_authenticate(cmo)
+        response = self.client.get('/api/v1/grievances/cmo/queue/')
+        self.assertEqual(response.data[0]['ai_recommendation']['decision'], 'PENDING')
+        adopted = self.client.post(f'/api/v1/grievances/{grievance.pk}/ai-recommendation/decision/', {'decision': 'ACCEPTED'})
+        self.assertEqual(adopted.status_code, 200, adopted.data)
+        grievance.refresh_from_db()
+        recommendation.refresh_from_db()
+        self.assertEqual((grievance.department, grievance.category, grievance.priority), (department, 'Road Safety', 'HIGH'))
+        self.assertEqual(recommendation.reviewed_by, cmo)
+        self.assertIsNotNone(recommendation.reviewed_at)
+        self.assertTrue(grievance.history.get().is_internal)
+        self.client.force_authenticate(self.citizen)
+        self.assertIsNone(self.client.get(f'/api/v1/grievances/{grievance.pk}/').data['ai_recommendation'])
+
+    def test_cmo_can_override_ai_suggestion_and_officer_cannot(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
+        original = Department.objects.create(name='Public Works', code='AIO', description='Roads')
+        replacement = Department.objects.create(name='Water', code='WTR', description='Water services')
+        AIRecommendation.objects.create(grievance=grievance, department=original, category='Roads', priority='HIGH', summary='Fix the road.')
+        officer = User.objects.create_user(email='ai-override-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER)
+        self.client.force_authenticate(officer)
+        url = f'/api/v1/grievances/{grievance.pk}/ai-recommendation/decision/'
+        body = {'decision': 'OVERRIDDEN', 'department_id': replacement.pk, 'category': 'Infrastructure', 'priority': 'LOW'}
+        self.assertEqual(self.client.post(url, body).status_code, 403)
+        cmo = User.objects.create_user(email='ai-override-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        self.client.force_authenticate(cmo)
+        response = self.client.post(url, body)
+        self.assertEqual(response.status_code, 200, response.data)
+        grievance.refresh_from_db()
+        self.assertEqual((grievance.department, grievance.category, grievance.priority), (replacement, 'Infrastructure', 'LOW'))
+
+    def test_cmo_public_progress_is_visible_and_cmo_escalation_is_audited(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
+        cmo = User.objects.create_user(email='escalation-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        officer = User.objects.create_user(email='escalation-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER)
+        self.client.force_authenticate(cmo)
+        update = self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'The case has been escalated for urgent district review.', 'is_public': True})
+        self.assertEqual(update.status_code, 201, update.data)
+        escalation = self.client.post(f'/api/v1/grievances/{grievance.pk}/escalations/', {'reason': 'Urgent public safety concern requires executive oversight.'})
+        self.assertEqual(escalation.status_code, 201, escalation.data)
+        self.assertEqual(escalation.data['raised_by'], cmo.email)
+        self.assertEqual(self.client.get(f'/api/v1/grievances/{grievance.pk}/escalations/').data[0]['id'], escalation.data['id'])
+        self.client.force_authenticate(officer)
+        self.assertEqual(self.client.post(f'/api/v1/grievances/{grievance.pk}/escalations/', {'reason': 'Unauthorized escalation attempt reason.'}).status_code, 403)
+        public = self.client.get(f'/api/v1/grievances/track/{grievance.reference_number}/')
+        self.assertIn('district review', str(public.data))
+        self.assertNotIn('executive oversight', str(public.data))
+
+    def test_cmo_queue_filters_district_category_priority_and_status(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, district='Ernakulam', category='Roads', priority='HIGH', **{key:value for key,value in self.payload().items() if key not in ('district','category')})
+        cmo = User.objects.create_user(email='filters-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        self.client.force_authenticate(cmo)
+        for query in ('district=Ernakulam', 'category=Roads', 'priority=HIGH', 'status=SUBMITTED'):
+            response = self.client.get(f'/api/v1/grievances/cmo/queue/?{query}')
+            self.assertEqual([row['id'] for row in response.data], [grievance.pk], query)
+        self.assertEqual(self.client.get('/api/v1/grievances/cmo/queue/?district=Kollam').data, [])
 
     def test_assignment_remarks_are_visible_to_officers_but_never_to_citizens(self):
         grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
@@ -73,7 +170,7 @@ class CitizenGrievanceAPITests(APITestCase):
         self.assertEqual(Grievance.objects.count(), 0)
 
     def test_valid_attachment_requires_owner_for_download(self):
-        file = SimpleUploadedFile('photo.jpg', b'jpeg-bytes', content_type='image/jpeg')
+        file = SimpleUploadedFile('photo.jpg', b'\xff\xd8\xffjpeg-bytes', content_type='image/jpeg')
         response = self.client.post('/api/v1/grievances/', {**self.payload(), 'attachments': file}, format='multipart')
         self.assertEqual(response.status_code, 201, response.data)
         attachment = Attachment.objects.get()
@@ -83,6 +180,10 @@ class CitizenGrievanceAPITests(APITestCase):
         self.client.force_authenticate(self.citizen)
         allowed = self.client.get(f'/api/v1/grievances/{attachment.grievance_id}/attachments/{attachment.pk}/')
         self.assertEqual(allowed.status_code, 200)
+
+    def test_attachment_rejects_fake_image_with_allowed_extension(self):
+        response = self.client.post('/api/v1/grievances/', {**self.payload(), 'attachments': SimpleUploadedFile('photo.jpg', b'not-an-image', content_type='image/jpeg')}, format='multipart')
+        self.assertEqual(response.status_code, 400)
 
     def test_authentication_required_for_private_grievance_endpoints(self):
         self.client.force_authenticate(None)
@@ -95,10 +196,14 @@ class CitizenGrievanceAPITests(APITestCase):
         officer = User.objects.create_user(email='officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=department)
         cmo = User.objects.create_user(email='cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
         self.client.force_authenticate(cmo)
+        reviewing = self.client.post(f'/api/v1/grievances/{grievance.pk}/cmo/review/', {'remarks': 'Initial review started.'})
+        self.assertEqual(reviewing.status_code, 200, reviewing.data)
         assigned = self.client.post(f'/api/v1/grievances/{grievance.pk}/assign/', {'department_id': department.pk, 'officer_id': officer.pk})
         self.assertEqual(assigned.status_code, 200, assigned.data)
         self.client.force_authenticate(officer)
         self.assertEqual(len(self.client.get('/api/v1/grievances/officer/queue/').data), 1)
+        forbidden_resolution = self.client.post(f'/api/v1/grievances/{grievance.pk}/resolve/', {'remarks': 'Officer cannot resolve.'})
+        self.assertEqual(forbidden_resolution.status_code, 403)
         update = self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Road crew inspected the damaged section.'})
         self.assertEqual(update.status_code, 201, update.data)
         report = self.client.post(f'/api/v1/grievances/{grievance.pk}/action-reports/', {'report': 'Road repaired and inspected.'})
@@ -113,6 +218,13 @@ class CitizenGrievanceAPITests(APITestCase):
         history = list(grievance.history.order_by('created_at').values_list('previous_status', 'new_status'))
         self.assertEqual(history[-1], (Grievance.Status.IN_PROGRESS, Grievance.Status.RESOLVED))
         self.assertNotIn('Road crew inspected', str(self.client.get(f'/api/v1/grievances/{grievance.pk}/').data))
+        self.client.force_authenticate(self.citizen)
+        feedback = self.client.post(f'/api/v1/grievances/{grievance.pk}/feedback/', {'rating': 4, 'comments': 'The repair is holding.'})
+        self.assertEqual(feedback.status_code, 201, feedback.data)
+        reopened = self.client.post(f'/api/v1/grievances/{grievance.pk}/reopen/', {'remarks': 'The repair failed again after rain.'})
+        self.assertEqual(reopened.status_code, 200, reopened.data)
+        self.assertEqual(reopened.data['status'], Grievance.Status.REOPENED)
+        self.assertEqual(reopened.data['feedback']['rating'], 4)
 
     def test_cmo_cannot_resolve_before_report_acceptance(self):
         grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())

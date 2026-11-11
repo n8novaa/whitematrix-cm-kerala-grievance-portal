@@ -4,6 +4,7 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 from apps.accounts.models import User
 from apps.departments.models import Department
+from apps.grievances.models import AIRecommendation, Grievance
 
 
 class GrievanceAnalysisAPITests(APITestCase):
@@ -35,6 +36,48 @@ class GrievanceAnalysisAPITests(APITestCase):
         self.assertTrue(response.data['advisory'])
         self.assertEqual(response.data['department_code'], department.code)
         self.assertEqual(response.data['priority'], 'HIGH')
+        submitted = self.client.post('/api/v1/grievances/', {
+            'district': 'Ernakulam', 'category': 'Roads', 'subject': 'School road hazard',
+            'description': self.payload['description'], 'ai_recommendation_token': response.data['recommendation_token'],
+        }, format='json')
+        self.assertEqual(submitted.status_code, 201, submitted.data)
+        self.assertEqual(AIRecommendation.objects.get(grievance_id=submitted.data['id']).priority, 'HIGH')
+
+    @override_settings(GEMINI_API_KEY='test-key')
+    @patch('apps.ai_assistant.views.genai.Client')
+    def test_ai_token_cannot_be_reused_for_different_grievance_text(self, client_factory):
+        Department.objects.create(name='Public Works', code='PWD', description='Roads')
+        client_factory.return_value.models.generate_content.return_value.text = '{"department_code":"PWD","category":"Roads","priority":"HIGH","summary":"Inspect the road."}'
+        self.client.force_authenticate(self.citizen)
+        analysis = self.client.post('/api/v1/ai/analyze/', self.payload)
+        submitted = self.client.post('/api/v1/grievances/', {
+            'district': 'Ernakulam', 'category': 'Roads', 'subject': 'Other issue',
+            'description': 'A different and unrelated grievance description submitted by the citizen.',
+            'ai_recommendation_token': analysis.data['recommendation_token'],
+        }, format='json')
+        self.assertEqual(submitted.status_code, 400)
+
+    @override_settings(GEMINI_API_KEY='test-key')
+    @patch('apps.ai_assistant.views.genai.Client')
+    def test_analysis_is_persisted_only_for_matching_owned_grievance(self, client_factory):
+        department = Department.objects.create(name='Public Works', code='PWD', description='Roads')
+        grievance = Grievance.objects.create(citizen=self.citizen, district='Ernakulam', category='Roads', subject='School road hazard', description=self.payload['description'])
+        client_factory.return_value.models.generate_content.return_value.text = '{"department_code":"PWD","category":"Road Safety","priority":"HIGH","summary":"Inspect the school road hazard."}'
+        self.client.force_authenticate(self.citizen)
+        response = self.client.post('/api/v1/ai/analyze/', {**self.payload, 'grievance_id': grievance.pk})
+        self.assertEqual(response.status_code, 200, response.data)
+        recommendation = AIRecommendation.objects.get(grievance=grievance)
+        self.assertEqual(recommendation.department, department)
+        self.assertEqual(recommendation.priority, 'HIGH')
+
+    @override_settings(GEMINI_API_KEY='test-key')
+    @patch('apps.ai_assistant.views.genai.Client')
+    def test_analysis_cannot_attach_recommendation_to_another_citizens_case(self, client_factory):
+        foreign = User.objects.create_user(email='foreign-ai@example.test', password='Test-pass-994!')
+        grievance = Grievance.objects.create(citizen=foreign, district='Ernakulam', category='Roads', subject='Other citizen', description=self.payload['description'])
+        self.client.force_authenticate(self.citizen)
+        response = self.client.post('/api/v1/ai/analyze/', {**self.payload, 'grievance_id': grievance.pk})
+        self.assertEqual(response.status_code, 404)
 
     @override_settings(GEMINI_API_KEY='test-key')
     @patch('apps.ai_assistant.views.genai.Client')

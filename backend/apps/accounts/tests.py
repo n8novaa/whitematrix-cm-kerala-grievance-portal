@@ -1,5 +1,6 @@
 from rest_framework import status
 from rest_framework.test import APITestCase
+from django.core.cache import cache
 from .models import User
 
 
@@ -28,6 +29,14 @@ class AuthenticationAPITests(APITestCase):
     def test_invalid_credentials_are_rejected(self):
         response = self.client.post('/api/v1/auth/login/', {'email': self.user.email, 'password': 'wrong'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_login_is_throttled(self):
+        cache.clear()
+        payload = {'email': self.user.email, 'password': 'wrong'}
+        for _ in range(10):
+            self.assertEqual(self.client.post('/api/v1/auth/login/', payload, format='json').status_code, 401)
+        self.assertEqual(self.client.post('/api/v1/auth/login/', payload, format='json').status_code, 429)
+        cache.clear()
 
     def test_refresh_returns_new_access_token(self):
         login = self.client.post('/api/v1/auth/login/', {'email': self.user.email, 'password': self.password}, format='json')

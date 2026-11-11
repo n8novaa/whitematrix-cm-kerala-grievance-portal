@@ -16,7 +16,7 @@ function HomePage({ user }) {
       </div>
       <div className="hero-panel" aria-label="Grievance status example">
         <div className="panel-topline"><span>DEMO TRACKING</span><span className="status-pill status-progress">In progress</span></div>
-        <p className="tracking-number">CMK-2026-A18C42F0</p>
+        <p className="tracking-number">CMK-2026-A18C42F0123456789ABCDEFFEDCBA987</p>
         <h2>Streetlight outage near the community hall</h2>
         <div className="mini-timeline"><span className="timeline-dot done" /><div><strong>Submitted</strong><small>Reference created</small></div><time>10 Nov</time></div>
         <div className="mini-timeline"><span className="timeline-dot done" /><div><strong>Under review</strong><small>Department assigned</small></div><time>11 Nov</time></div>
