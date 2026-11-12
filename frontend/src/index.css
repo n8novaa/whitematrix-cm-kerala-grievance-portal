@@ -33,3 +33,51 @@ a { color: inherit; }
 img { max-width: 100%; }
 :focus-visible { outline: 3px solid #e3a64d; outline-offset: 3px; }
 ::selection { background: #bfe4d8; color: #102e30; }
+
+.password-field { display: grid; gap: 7px; }
+.password-control { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); overflow: hidden; }
+.password-control:focus-within { outline: 3px solid #e3a64d; outline-offset: 2px; }
+.password-control input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 11px 12px; }
+.password-control input:focus-visible { outline: 0; }
+.password-toggle { border: 0; background: transparent; padding: 0 13px; color: var(--green-dark); font-weight: 700; cursor: pointer; }
+.password-toggle:hover { background: var(--green-pale); }
+.field-error { margin: 0; color: var(--red); font-size: .9rem; }
+.submission-success { max-width: 720px; margin: 28px auto; padding: clamp(24px, 5vw, 48px); border: 1px solid var(--line); border-radius: 16px; background: var(--paper); box-shadow: var(--shadow); text-align: center; }
+.submission-success h2 { margin: 8px 0; font-size: clamp(1.7rem, 4vw, 2.4rem); }
+.success-mark { display: inline-grid; place-items: center; width: 54px; height: 54px; border-radius: 50%; background: var(--green-pale); color: var(--green-dark); font-size: 1.6rem; font-weight: 800; }
+.reference-copy { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin: 24px 0 12px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--canvas); }
+.reference-copy code { font-size: clamp(.95rem, 2vw, 1.15rem); font-weight: 700; overflow-wrap: anywhere; }
+.copy-feedback { color: var(--green-dark); font-weight: 700; }
+.submission-success .button-row { justify-content: center; margin-top: 24px; }
+.home-stats, .featured-departments { margin: 42px auto; max-width: 1180px; padding: 0 24px; }
+.sample-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 18px 0 10px; }
+.sample-stat-grid article { display: grid; gap: 5px; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.sample-stat-grid strong { color: var(--green-dark); font-size: 2rem; }
+.sample-stat-grid span { color: var(--muted); }
+.about-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+.about-grid article { padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.about-grid h2 { margin: 6px 0 10px; font-size: 1.35rem; }
+.about-grid ul { padding-left: 20px; line-height: 1.8; }
+.review-group { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.review-group > .eyebrow { margin: 0 0 4px; }
+.official-values { display: grid; gap: 5px; margin: 14px 0; padding: 13px 15px; border-left: 3px solid var(--green); background: var(--green-pale); }
+.official-values span { color: var(--green-dark); }
+.case-overdue { background: #fff9f1; }
+.case-overdue td:first-child { border-left: 3px solid var(--amber); }
+.overdue-label { display: block; margin-top: 4px; color: var(--amber); font-size: .75rem; font-weight: 800; text-transform: uppercase; }
+.overdue-banner { display: grid; gap: 4px; margin: 14px 0; padding: 13px 15px; border: 1px solid #edc987; border-radius: 9px; background: var(--amber-pale); color: #75470b; }
+.escalation-section { border-color: #edc987; background: #fffaf2; }
+.escalation-priority { box-shadow: inset 4px 0 #c67a12; }
+.officer-report-compose { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--canvas); }
+.report-state { display: grid; gap: 4px; margin-bottom: 12px; padding: 12px; border-radius: 8px; }
+.report-state-pending { border: 1px solid #b9cce0; background: var(--blue-pale); color: #284764; }
+.report-state-returned { border: 1px solid #edc987; background: var(--amber-pale); color: #75470b; }
+.report-card-returned { border-left: 3px solid var(--amber); }
+.report-card-pending { border-left: 3px solid var(--blue); }
+
+@media (max-width: 640px) {
+  .sample-stat-grid, .about-grid { grid-template-columns: 1fr; }
+  .home-stats, .featured-departments { padding: 0 16px; }
+  .submission-success { margin: 18px 12px; padding: 24px 16px; }
+  .reference-copy { align-items: stretch; flex-direction: column; }
+}

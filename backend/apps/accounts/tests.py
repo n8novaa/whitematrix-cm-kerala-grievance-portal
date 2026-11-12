@@ -8,17 +8,31 @@ class AuthenticationAPITests(APITestCase):
     password = 'Valid-Password-934!'
 
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(email='citizen@example.test', password=self.password)
 
     def test_public_registration_creates_citizen_only(self):
         response = self.client.post('/api/v1/auth/register/', {
-            'email': 'New.Citizen@example.test', 'password': self.password,
-            'first_name': 'New', 'role': 'CMO',
+            'email': 'New.Citizen@example.test', 'password': self.password, 'confirm_password': self.password,
+            'first_name': 'New', 'last_name': 'Citizen', 'mobile_number': '+919876543210', 'role': 'CMO',
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         user = User.objects.get(email='new.citizen@example.test')
         self.assertEqual(user.role, User.Role.CITIZEN)
+        self.assertEqual(user.mobile_number, '+919876543210')
         self.assertNotIn('password', response.data)
+
+    def test_registration_requires_full_name_mobile_and_matching_password_confirmation(self):
+        base = {'email': 'complete@example.test', 'first_name': 'Complete', 'last_name': 'Citizen', 'mobile_number': '9876543210', 'password': self.password, 'confirm_password': self.password}
+        self.assertEqual(self.client.post('/api/v1/auth/register/', base, format='json').status_code, 201)
+        for update in (
+            {'last_name': ''}, {'mobile_number': ''}, {'mobile_number': 'not-a-mobile'},
+            {'confirm_password': 'Different-Password-99!'},
+        ):
+            with self.subTest(update=update):
+                body = {**base, 'email': f"invalid-{len(User.objects.all())}-{len(update)}@example.test", **update}
+                response = self.client.post('/api/v1/auth/register/', body, format='json')
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
 
     def test_login_returns_access_and_refresh_tokens(self):
         response = self.client.post('/api/v1/auth/login/', {'email': self.user.email, 'password': self.password}, format='json')

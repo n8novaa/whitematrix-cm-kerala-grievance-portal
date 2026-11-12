@@ -6,7 +6,7 @@ from django.db import transaction
 from google import genai
 from django.conf import settings
 from rest_framework import permissions, serializers, status
-from rest_framework.throttling import ScopedRateThrottle
+from apps.ai_assistant.throttles import AIAnalysisThrottle
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from apps.accounts.permissions import IsCitizen
@@ -21,7 +21,7 @@ class AnalysisInputSerializer(serializers.Serializer):
 
 class GrievanceAnalysisView(APIView):
     permission_classes = (permissions.IsAuthenticated, IsCitizen)
-    throttle_classes = (ScopedRateThrottle,)
+    throttle_classes = (AIAnalysisThrottle,)
     throttle_scope = 'ai_analysis'
 
     def post(self, request):
@@ -41,7 +41,7 @@ class GrievanceAnalysisView(APIView):
                   f'Departments: {json.dumps(departments)} Complaint: {serializer.validated_data["description"]}. '
                   'Return JSON with department_code, category, priority, summary.')
         try:
-            client = genai.Client(api_key=api_key, http_options={'timeout': 10000})
+            client = genai.Client(api_key=api_key, http_options={'timeout': 30000})
             result = client.models.generate_content(model=settings.GEMINI_MODEL, contents=prompt, config={'response_mime_type': 'application/json'})
             data = json.loads(result.text)
             if data.get('priority') not in ('LOW', 'MEDIUM', 'HIGH') or data.get('department_code') not in {d['code'] for d in departments}:

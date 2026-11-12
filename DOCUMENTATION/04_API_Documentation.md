@@ -2,6 +2,8 @@
 
 Base path: `/api/v1/`. Unless marked public, requests require `Authorization: Bearer <access-token>`. JSON endpoints use `Content-Type: application/json`; grievance creation can use multipart form data with repeated `attachments` fields. Timestamps are ISO 8601.
 
+`GET /health/` is a deployment health endpoint. It returns 200 only when Django can reach its database and configured cache.
+
 ## Authentication
 
 | Method and path | Access | Purpose |
@@ -11,6 +13,8 @@ Base path: `/api/v1/`. Unless marked public, requests require `Authorization: Be
 | `POST /auth/refresh/` | Public, throttled | Rotates refresh token and returns access token. |
 | `POST /auth/logout/` | Authenticated | Blacklists the caller’s refresh token. |
 | `GET/PATCH /auth/profile/` | Authenticated | Read/update caller profile fields. |
+
+Registration requires `email`, `password`, `confirm_password`, `first_name`, `last_name`, and `mobile_number`. The server validates mobile number format and matching passwords; registration always creates a citizen account.
 
 ## Departments and AI
 
@@ -25,13 +29,13 @@ Base path: `/api/v1/`. Unless marked public, requests require `Authorization: Be
 - `GET /grievances/track/{reference}/`: public and throttled; shows status and public history only.
 - `GET /grievances/{id}/attachments/{attachment_id}/`: owner, active assigned officer, or CMO only.
 - `POST /grievances/{id}/reopen/`: owning citizen; `{ "remarks": "..." }`; resolved cases only.
-- `POST /grievances/{id}/feedback/`: owning citizen; resolved case only; `{ "rating": 1..5, "comments": "..." }`; one per case.
+- `POST /grievances/{id}/feedback/`: owning citizen; resolved case only; `{ "rating": 1..5, "comments": "..." }`; one per resolution cycle (cycle increments on each resolution).
 
 ## CMO operations
 
 - `GET /grievances/cmo/queue/`: CMO-only. Optional query parameters: `status`, `department`, `district`, `category`, `priority`, `search`.
 - `POST /grievances/{id}/cmo/review/`: move valid case to `UNDER_REVIEW`; optional internal `remarks`.
-- `POST /grievances/{id}/assign/`: `{ "department_id": 1, "officer_id": 2, "remarks": "internal note" }`; changes active assignment and advances new/reopened cases to progress.
+- `POST /grievances/{id}/assign/`: `{ "department_id": 1, "officer_id": 2, "remarks": "internal note" }`; CMO review is required first. It changes the active assignment and advances reviewed new/reopened cases to progress.
 - `POST /grievances/{id}/ai-recommendation/decision/`: `{ "decision": "ACCEPTED" }` or `{ "decision": "OVERRIDDEN", "department_id": 1, "category": "Roads", "priority": "HIGH" }`.
 - `POST /grievances/{id}/escalations/`, `GET /grievances/{id}/escalations/`: CMO-only; create with `{ "reason": "at least 10 characters" }`, list audit records.
 - `POST /grievances/action-reports/{report_id}/review/`: `{ "decision": "ACCEPTED"|"RETURNED", "remarks": "..." }`.

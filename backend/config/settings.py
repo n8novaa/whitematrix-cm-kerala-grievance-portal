@@ -11,30 +11,48 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 from pathlib import Path
-from decouple import config as env
-from urllib.parse import unquote, urlparse
+from decouple import AutoConfig
+from urllib.parse import parse_qs, unquote, urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+env = AutoConfig(search_path=BASE_DIR)
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-DEBUG = env('DJANGO_DEBUG', default=False, cast=bool)
+DJANGO_ENV = env('DJANGO_ENV', default='development').strip().lower()
+if DJANGO_ENV not in ('development', 'production'):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DJANGO_ENV must be either development or production.')
+DEBUG = env('DJANGO_DEBUG', default=DJANGO_ENV != 'production', cast=bool)
+if DJANGO_ENV == 'production' and DEBUG:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DJANGO_DEBUG must be False when DJANGO_ENV is production.')
 SECRET_KEY = env('DJANGO_SECRET_KEY', default='')
 if not SECRET_KEY:
     from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured('DJANGO_SECRET_KEY must be configured.')
+if not DEBUG and (
+    len(SECRET_KEY) < 50
+    or len(set(SECRET_KEY)) < 5
+    or SECRET_KEY.lower().startswith(('replace-', 'change-me', 'your-'))
+):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('Production DJANGO_SECRET_KEY must be a unique random value of at least 50 characters.')
 GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
-GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-2.5-flash')
+GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-3.5-flash-lite')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 ALLOWED_HOSTS = env('DJANGO_ALLOWED_HOSTS', default='localhost,127.0.0.1' if DEBUG else '', cast=lambda value: [host.strip() for host in value.split(',') if host.strip()])
 if not ALLOWED_HOSTS:
     from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured('DJANGO_ALLOWED_HOSTS must list the deployed hostnames when DEBUG is False.')
+if not DEBUG and any(host == '*' or '://' in host or '/' in host for host in ALLOWED_HOSTS):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('Production DJANGO_ALLOWED_HOSTS must contain exact hostnames without schemes or paths.')
 AUTH_USER_MODEL = 'accounts.User'
 
 
@@ -96,10 +114,21 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 DATABASE_URL = env('DATABASE_URL', default='').strip()
+if not DATABASE_URL and not DEBUG:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DATABASE_URL must configure PostgreSQL when DEBUG is False.')
 if DATABASE_URL:
     parsed_database_url = urlparse(DATABASE_URL)
     if parsed_database_url.scheme not in ('postgres', 'postgresql'):
-        raise ValueError('DATABASE_URL must use PostgreSQL (postgres:// or postgresql://).')
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured('DATABASE_URL must use PostgreSQL (postgres:// or postgresql://).')
+    if not parsed_database_url.hostname or not parsed_database_url.path.strip('/'):
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured('DATABASE_URL must include a PostgreSQL host and database name.')
+    database_sslmode = parse_qs(parsed_database_url.query).get('sslmode', [None])[0]
+    if not DEBUG and parsed_database_url.hostname not in ('database', 'db', 'localhost', '127.0.0.1') and database_sslmode not in ('require', 'verify-ca', 'verify-full'):
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured('External production PostgreSQL connections must use TLS (sslmode=require or stronger).')
     DATABASES = {'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': unquote(parsed_database_url.path.lstrip('/')),
@@ -107,7 +136,9 @@ if DATABASE_URL:
         'PASSWORD': unquote(parsed_database_url.password or ''),
         'HOST': parsed_database_url.hostname or '',
         'PORT': parsed_database_url.port or '',
-        'OPTIONS': {'sslmode': 'require'} if parsed_database_url.query.find('sslmode=require') >= 0 else {},
+        'OPTIONS': {'sslmode': database_sslmode or ('require' if not DEBUG else 'prefer')},
+        'CONN_MAX_AGE': 60,
+        'CONN_HEALTH_CHECKS': True,
     }}
 else:
     DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
@@ -147,14 +178,33 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-MEDIA_URL = 'media/'
-MEDIA_ROOT = Path(env('DJANGO_MEDIA_ROOT', default=str(BASE_DIR / 'media')))
+MEDIA_URL = '/media/'
+MEDIA_ROOT_VALUE = env('DJANGO_MEDIA_ROOT', default=str(BASE_DIR / 'media') if DEBUG else '').strip()
+if not MEDIA_ROOT_VALUE:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DJANGO_MEDIA_ROOT must point to writable media storage when DEBUG is False.')
+MEDIA_ROOT = Path(MEDIA_ROOT_VALUE)
+if not DEBUG and not MEDIA_ROOT.is_absolute():
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('Production DJANGO_MEDIA_ROOT must be an absolute writable-storage path.')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATIC_URL = 'static/'
 CORS_ALLOWED_ORIGINS = env('CORS_ALLOWED_ORIGINS', default='http://localhost:5173' if DEBUG else '', cast=lambda value: [origin.strip() for origin in value.split(',') if origin.strip()])
+CSRF_TRUSTED_ORIGINS = env('CSRF_TRUSTED_ORIGINS', default='http://localhost:5173' if DEBUG else '', cast=lambda value: [origin.strip() for origin in value.split(',') if origin.strip()])
+if not DEBUG:
+    from django.core.exceptions import ImproperlyConfigured
+    if not CORS_ALLOWED_ORIGINS or not CSRF_TRUSTED_ORIGINS:
+        raise ImproperlyConfigured('CORS_ALLOWED_ORIGINS and CSRF_TRUSTED_ORIGINS must be configured for production.')
+    for origin in (*CORS_ALLOWED_ORIGINS, *CSRF_TRUSTED_ORIGINS):
+        parsed_origin = urlparse(origin)
+        if parsed_origin.scheme != 'https' or not parsed_origin.netloc or parsed_origin.path not in ('', '/') or '*' in origin:
+            raise ImproperlyConfigured('Production CORS and CSRF origins must be exact HTTPS origins without paths or wildcards.')
+if DEBUG:
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'grievance-portal-local'}}
+else:
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.db.DatabaseCache', 'LOCATION': 'django_cache'}}
 STORAGES = {
     'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
     'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
@@ -165,7 +215,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'auth': '10/min',
         'tracking': '30/hour',
-        'ai_analysis': '10/hour',
+        'ai_analysis': '5/min',
         'public_form': '10/hour',
     },
     'NUM_PROXIES': env('API_NUM_PROXIES', default=1, cast=int),
@@ -180,16 +230,21 @@ SIMPLE_JWT = {
     'UPDATE_LAST_LOGIN': True,
 }
 
-SECURE_SSL_REDIRECT = not DEBUG and env('SECURE_SSL_REDIRECT', default=True, cast=bool)
+SECURE_SSL_REDIRECT = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 SECURE_REFERRER_POLICY = 'same-origin'
 SECURE_HSTS_SECONDS = env('SECURE_HSTS_SECONDS', default=31536000 if not DEBUG else 0, cast=int)
-SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
-SECURE_HSTS_PRELOAD = not DEBUG
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if env('TRUST_PROXY_SSL_HEADER', default=False, cast=bool) else None
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=False, cast=bool)
+SECURE_HSTS_PRELOAD = env('SECURE_HSTS_PRELOAD', default=False, cast=bool)
+TRUST_PROXY_SSL_HEADER = env('TRUST_PROXY_SSL_HEADER', default=False, cast=bool)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if TRUST_PROXY_SSL_HEADER else None
 
 
 # Email

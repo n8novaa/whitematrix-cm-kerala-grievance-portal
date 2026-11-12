@@ -57,3 +57,7 @@ npm run build
 ```
 
 Tests use a temporary test database and mock Gemini provider calls. A live Gemini request requires a valid secret and network/provider access.
+
+## Production deployment
+
+Use the Compose stack and operator checklist in [the deployment runbook](08_Deployment_Readiness.md). Configure `.env.production` outside Git, run PostgreSQL migrations and create the shared throttle cache table before starting the application. Do not deploy using local demo data or development secrets.

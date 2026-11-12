@@ -4,6 +4,12 @@ from django.db import models
 from django.utils import timezone
 from apps.departments.models import Department
 
+KERALA_DISTRICTS = (
+    'Alappuzha', 'Ernakulam', 'Idukki', 'Kannur', 'Kasaragod', 'Kollam', 'Kottayam',
+    'Kozhikode', 'Malappuram', 'Palakkad', 'Pathanamthitta', 'Thiruvananthapuram',
+    'Thrissur', 'Wayanad',
+)
+
 
 def create_reference_number():
     year = timezone.now().year
@@ -25,7 +31,7 @@ class Grievance(models.Model):
 
     reference_number = models.CharField(max_length=48, unique=True, default=create_reference_number, editable=False)
     citizen = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='grievances')
-    district = models.CharField(max_length=80, blank=True)
+    district = models.CharField(max_length=80, choices=tuple((name, name) for name in KERALA_DISTRICTS))
     department = models.ForeignKey(Department, null=True, blank=True, on_delete=models.PROTECT, related_name='grievances')
     category = models.CharField(max_length=80)
     subject = models.CharField(max_length=200)
@@ -91,16 +97,27 @@ class ActionTakenReport(models.Model):
     review_remarks = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=('grievance',),
+            condition=models.Q(review_status='PENDING'),
+            name='one_pending_action_report_per_grievance',
+        )]
+
 
 class CitizenFeedback(models.Model):
-    grievance = models.OneToOneField(Grievance, on_delete=models.CASCADE, related_name='feedback')
+    grievance = models.ForeignKey(Grievance, on_delete=models.CASCADE, related_name='feedbacks')
     citizen = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='grievance_feedback')
+    resolution_cycle = models.PositiveIntegerField(default=1)
     rating = models.PositiveSmallIntegerField()
     comments = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [models.CheckConstraint(condition=models.Q(rating__gte=1, rating__lte=5), name='feedback_rating_1_to_5')]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(rating__gte=1, rating__lte=5), name='feedback_rating_1_to_5'),
+            models.UniqueConstraint(fields=('grievance', 'resolution_cycle'), name='one_feedback_per_resolution_cycle'),
+        ]
 
 
 class GrievanceEscalation(models.Model):

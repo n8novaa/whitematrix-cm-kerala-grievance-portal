@@ -1,4 +1,5 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const RETRYABLE_STATUSES = new Set([502, 503, 504])
 
 export class ApiError extends Error {
   constructor(message, status, data) {
@@ -6,6 +7,31 @@ export class ApiError extends Error {
     this.status = status
     this.data = data
   }
+}
+
+const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+async function fetchWithWarmupRetry(url, options) {
+  const isReadOnly = ['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase())
+  const maxAttempts = isReadOnly ? 3 : 1
+  let response
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      response = await fetch(url, options)
+    } catch (error) {
+      if (attempt === maxAttempts - 1) {
+        throw new ApiError('The service is starting or temporarily unreachable. Please try again shortly.', 0, error)
+      }
+      await wait(1000 * (attempt + 1))
+      continue
+    }
+
+    if (!isReadOnly || !RETRYABLE_STATUSES.has(response.status) || attempt === maxAttempts - 1) return response
+    await wait(1000 * (attempt + 1))
+  }
+
+  return response
 }
 
 function errorMessage(data) {
@@ -21,7 +47,7 @@ function errorMessage(data) {
 async function refreshAccessToken() {
   const refresh = localStorage.getItem('refreshToken')
   if (!refresh) return null
-  const response = await fetch(`${API_BASE}/api/v1/auth/refresh/`, {
+  const response = await fetchWithWarmupRetry(`${API_BASE}/api/v1/auth/refresh/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh }),
@@ -40,7 +66,7 @@ export async function api(path, options = {}, retry = true) {
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  const response = await fetch(`${API_BASE}/api/v1${path}`, { ...options, headers })
+  const response = await fetchWithWarmupRetry(`${API_BASE}/api/v1${path}`, { ...options, headers })
   const tokenEndpoint = path.includes('/auth/login/') || path.includes('/auth/refresh/')
   if (response.status === 401 && retry && !tokenEndpoint) {
     const refreshed = await refreshAccessToken()
@@ -49,8 +75,23 @@ export async function api(path, options = {}, retry = true) {
   if (response.status === 204) return null
   const contentType = response.headers.get('content-type') || ''
   const data = contentType.includes('application/json') ? await response.json() : await response.blob()
+  if (RETRYABLE_STATUSES.has(response.status)) {
+    throw new ApiError('The service is starting or temporarily unavailable. Please try again shortly.', response.status, data)
+  }
   if (!response.ok) throw new ApiError(errorMessage(data), response.status, data)
   return data
+}
+
+export async function downloadGrievanceAttachment(grievanceId, attachment) {
+  const file = await api(`/grievances/${grievanceId}/attachments/${attachment.id}/`)
+  const url = URL.createObjectURL(file)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = attachment.original_name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export function jsonRequest(method, payload) {

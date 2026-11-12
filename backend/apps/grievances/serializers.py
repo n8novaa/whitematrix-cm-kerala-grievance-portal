@@ -44,7 +44,8 @@ class GrievanceHistorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GrievanceHistory
-        fields = ('previous_status', 'new_status', 'remarks', 'created_at', 'responsible_user_role')
+        fields = ('previous_status', 'new_status', 'remarks', 'created_at', 'responsible_user_role', 'is_internal')
+        read_only_fields = fields
 
 
 class ActionTakenReportSerializer(serializers.ModelSerializer):
@@ -75,12 +76,13 @@ class GrievanceSerializer(serializers.ModelSerializer):
     action_reports = serializers.SerializerMethodField()
     assignment = serializers.SerializerMethodField()
     feedback = serializers.SerializerMethodField()
+    current_resolution_cycle = serializers.SerializerMethodField()
     ai_recommendation = serializers.SerializerMethodField()
     ai_recommendation_token = serializers.CharField(write_only=True, required=False)
 
     class Meta:
         model = Grievance
-        fields = ('id', 'reference_number', 'district', 'category', 'subject', 'description', 'priority', 'status', 'department', 'department_name', 'created_at', 'updated_at', 'history', 'attachments', 'action_reports', 'assignment', 'feedback', 'ai_recommendation', 'ai_recommendation_token')
+        fields = ('id', 'reference_number', 'district', 'category', 'subject', 'description', 'priority', 'status', 'department', 'department_name', 'created_at', 'updated_at', 'history', 'attachments', 'action_reports', 'assignment', 'feedback', 'current_resolution_cycle', 'ai_recommendation', 'ai_recommendation_token')
         read_only_fields = ('id', 'reference_number', 'priority', 'status', 'department', 'created_at', 'updated_at')
 
     def get_history(self, obj):
@@ -122,11 +124,19 @@ class GrievanceSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated or request.user.role != 'CITIZEN' or obj.citizen_id != request.user.pk:
             return None
-        try:
-            feedback = obj.feedback
-        except CitizenFeedback.DoesNotExist:
+        feedback = obj.feedbacks.order_by('-resolution_cycle', '-created_at', '-pk').first()
+        if not feedback:
             return None
-        return {'rating': feedback.rating, 'comments': feedback.comments, 'created_at': feedback.created_at}
+        return {
+            'rating': feedback.rating,
+            'comments': feedback.comments,
+            'created_at': feedback.created_at,
+            'resolution_cycle': feedback.resolution_cycle,
+        }
+
+    def get_current_resolution_cycle(self, obj):
+        completed_cycles = sum(item.new_status == Grievance.Status.RESOLVED for item in obj.history.all())
+        return max(1, completed_cycles)
 
     def get_ai_recommendation(self, obj):
         request = self.context.get('request')

@@ -2,33 +2,25 @@
 
 Last updated: 12 November 2026
 
-## Phase tracking
+## Verified
 
-| Phase | State | Evidence / outstanding work |
-|---|---|---|
-| 1. Security and production configuration | Implemented; deployment configuration remains | Required secret; DEBUG defaults off; scoped throttles; TLS/security headers; upload type/signature validation; 128-bit references. Production Django check passes with deployment-shaped placeholder settings. Shared cache, real secrets, database, and media storage must be provisioned per environment. |
-| 2. Grievance lifecycle | Implemented | Atomic CMO report validation/transition/history; report return, citizen reopen, assignment scoping, and public/internal update behavior covered by tests. |
-| 3. AI integration | Implemented; live provider unverified | Timed advisory analysis, validated outputs, signed short-lived recommendation token, persisted pending recommendation, and audited CMO accept/override. No live Gemini credential was available. |
-| 4. CMO dashboard | Implemented | Queue filters, district statistics, review, assignment, report accept/return, resolution, escalations, and AI recommendation decisions. |
-| 5. Citizen and officer communication | Implemented | Submission, tracking, history, attachments, feedback/reopen, officer reports/progress, optional public updates; internal notes excluded from citizen views. |
-| 6. Backend/frontend testing | Verified | Backend suite: 48 passed; Django checks and migration drift check passed. Frontend lint and production build passed. Browser walkthrough verified CMO, citizen privacy, and officer update interactions. |
-| 7. Documentation | Implemented | README plus eight guides in `DOCUMENTATION/`, including architecture/ER diagrams, API, AI, setup, user, and deployment readiness; HANDOFF updated. |
-| 8. Deployment readiness | Prototype-ready; not deployed | `collectstatic` and production-config `check --deploy` passed using placeholders. No hosted deployment or external service connectivity was tested. |
+- Backend regression suite: 62 tests passed, including lifecycle, authorization, current-cycle report, attachment, AI error/throttle, registration, and health endpoint coverage.
+- Django system checks and migration drift checks passed.
+- Static assets collected successfully (408 post-processed).
+- Frontend ESLint and production build passed.
+- Deployment-shaped Django `check --deploy` completed with two HSTS advisories about subdomain coverage and browser preload; values remain opt-in pending domain policy confirmation.
+- Docker Compose could not be validated or built because Docker is not installed in this workspace.
 
-## Current changed areas
+## Deployment preparation
 
-- Security settings, endpoint throttling, Gemini timeout, attachment signature validation, secure 128-bit reference generation.
-- CMO lifecycle, public/internal updates, escalations, AI recommendation decisions, and dashboard filters/statistics.
-- Migrations `0006` and `0007` applied locally and migration drift check passed.
+- Production settings require a strong secret, `DEBUG=False`, exact hosts/origins, PostgreSQL, and absolute persistent media path.
+- Compose defines PostgreSQL, Django/Gunicorn, and Nginx/Vite services, with persistent DB/media volumes, shared DB cache, migrations/cache-table instructions, and health endpoint.
+- Backend and frontend environment examples use safe placeholders; local `.env` files are ignored. No real Gemini key or production secret is included.
+- Feedback is unique per resolution cycle. Reopened cases require a fresh accepted report from the currently assigned officer.
 
-## Verified in this continuation
+## Remaining before public launch
 
-- Backend full suite: 48 tests passed; Django checks clean; migration drift check clean.
-- Frontend lint and build passed; browser role walkthrough completed.
-- Deployment check and `collectstatic` passed with placeholder configuration; no deployment performed.
-
-## Known blockers
-
-- No Gemini credential or hosted infrastructure is available, so live provider and hosted deployment behavior remain unverified.
-- The requested “UI/UX Pro Max” skill is not installed; the installed Taste frontend and frontend UI engineering skills were used as the closest alternatives.
-- DRF throttling defaults to a local in-process cache; configure shared cache for multi-worker deployments. JWTs remain in browser localStorage, so XSS hardening is required before production use.
+- Configure provider/domain/DNS/TLS, real production secrets, PostgreSQL and persistent storage; build and run Compose on a Docker host.
+- Verify backups/restores and perform hosted citizen → CMO → officer → CMO → citizen and authorized attachment workflows.
+- Verify live Gemini using an operator-provided key if needed; provider tests in this workspace are mocked.
+- Review JWT localStorage exposure and XSS hardening before processing real user data.

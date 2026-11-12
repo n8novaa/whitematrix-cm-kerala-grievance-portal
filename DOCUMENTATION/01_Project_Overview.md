@@ -10,7 +10,7 @@ People’s Desk is a fictional React/Vite and Django REST Framework prototype fo
 
 ## Workflow
 
-`SUBMITTED → UNDER_REVIEW → IN_PROGRESS → RESOLVED → REOPENED → UNDER_REVIEW or IN_PROGRESS`
+`SUBMITTED → UNDER_REVIEW → IN_PROGRESS → RESOLVED → REOPENED → UNDER_REVIEW → IN_PROGRESS → RESOLVED`
 
 The backend validates transitions and records each status change with its timestamp and responsible user. Assignment can move a new or reopened grievance directly to `IN_PROGRESS`. Officers cannot resolve cases. Resolution requires an accepted action report.
 

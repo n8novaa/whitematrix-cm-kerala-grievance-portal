@@ -1,7 +1,12 @@
 from unittest.mock import patch
+from types import SimpleNamespace
+import time
 
+from django.conf import settings
+from django.core.cache import cache
 from django.test import override_settings
-from rest_framework.test import APITestCase
+from rest_framework.test import APIRequestFactory, APITestCase
+from rest_framework.throttling import ScopedRateThrottle
 from apps.accounts.models import User
 from apps.departments.models import Department
 from apps.grievances.models import AIRecommendation, Grievance
@@ -9,6 +14,7 @@ from apps.grievances.models import AIRecommendation, Grievance
 
 class GrievanceAnalysisAPITests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.citizen = User.objects.create_user(email='ai-citizen@example.test', password='Test-pass-994!')
         self.officer = User.objects.create_user(email='ai-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER)
         self.payload = {'description': 'A damaged road creates a serious safety risk near the local school.'}
@@ -17,6 +23,53 @@ class GrievanceAnalysisAPITests(APITestCase):
         self.assertEqual(self.client.post('/api/v1/ai/analyze/', self.payload).status_code, 401)
         self.client.force_authenticate(self.officer)
         self.assertEqual(self.client.post('/api/v1/ai/analyze/', self.payload).status_code, 403)
+
+    @override_settings(GEMINI_API_KEY='')
+    def test_future_cache_entry_does_not_produce_excessive_retry_after(self):
+        cache.clear()
+        request = APIRequestFactory().post('/api/v1/ai/analyze/', self.payload)
+        request.user = self.citizen
+        throttle = ScopedRateThrottle()
+        throttle.scope = 'ai_analysis'
+        key = throttle.get_cache_key(request, SimpleNamespace(throttle_scope='ai_analysis'))
+        limit = int(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']['ai_analysis'].split('/')[0])
+        _, duration = throttle.parse_rate(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']['ai_analysis'])
+        cache.set(key, [time.time() + 3600] * limit, timeout=duration)
+        self.client.force_authenticate(self.citizen)
+        response = self.client.post('/api/v1/ai/analyze/', self.payload)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('Retry-After', response)
+
+    @override_settings(GEMINI_API_KEY='')
+    def test_stale_cache_entries_do_not_block_ai_analysis(self):
+        request = APIRequestFactory().post('/api/v1/ai/analyze/', self.payload)
+        request.user = self.citizen
+        throttle = ScopedRateThrottle()
+        throttle.scope = 'ai_analysis'
+        key = throttle.get_cache_key(request, SimpleNamespace(throttle_scope='ai_analysis'))
+        limit = int(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']['ai_analysis'].split('/')[0])
+        _, duration = throttle.parse_rate(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']['ai_analysis'])
+        cache.set(key, [time.time() - (duration * 2)] * limit, timeout=duration)
+        self.client.force_authenticate(self.citizen)
+        response = self.client.post('/api/v1/ai/analyze/', self.payload)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('Retry-After', response)
+
+    def test_ai_throttle_retry_after_stays_within_configured_window(self):
+        cache.clear()
+        request = APIRequestFactory().post('/api/v1/ai/analyze/', self.payload)
+        request.user = self.citizen
+        throttle = ScopedRateThrottle()
+        throttle.scope = 'ai_analysis'
+        key = throttle.get_cache_key(request, SimpleNamespace(throttle_scope='ai_analysis'))
+        limit = int(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']['ai_analysis'].split('/')[0])
+        _, duration = throttle.parse_rate(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']['ai_analysis'])
+        cache.set(key, [time.time()] * limit, timeout=duration)
+        self.client.force_authenticate(self.citizen)
+        response = self.client.post('/api/v1/ai/analyze/', self.payload)
+        self.assertEqual(response.status_code, 429)
+        self.assertGreaterEqual(int(response['Retry-After']), 0)
+        self.assertLessEqual(int(response['Retry-After']), duration)
 
     @override_settings(GEMINI_API_KEY='')
     def test_missing_provider_key_returns_clear_unavailable_response(self):
@@ -36,6 +89,7 @@ class GrievanceAnalysisAPITests(APITestCase):
         self.assertTrue(response.data['advisory'])
         self.assertEqual(response.data['department_code'], department.code)
         self.assertEqual(response.data['priority'], 'HIGH')
+        client_factory.assert_called_once_with(api_key='test-key', http_options={'timeout': 30000})
         submitted = self.client.post('/api/v1/grievances/', {
             'district': 'Ernakulam', 'category': 'Roads', 'subject': 'School road hazard',
             'description': self.payload['description'], 'ai_recommendation_token': response.data['recommendation_token'],

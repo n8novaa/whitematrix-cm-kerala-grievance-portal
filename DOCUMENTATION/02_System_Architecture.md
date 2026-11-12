@@ -10,6 +10,7 @@ flowchart LR
   UI[React + Vite frontend]
   API[Django REST API]
   DB[(PostgreSQL in deployment / SQLite locally)]
+  Cache[(Shared PostgreSQL cache table in deployment)]
   Media[(Persistent media volume required)]
   Gemini[Google Gemini API]
   Static[WhiteNoise static assets]
@@ -18,6 +19,7 @@ flowchart LR
   Officer --> UI
   UI -->|JWT JSON / multipart| API
   API --> DB
+  API --> Cache
   API --> Media
   API -->|advisory analysis only| Gemini
   API --> Static
@@ -33,4 +35,4 @@ flowchart LR
 
 ## Deployment topology
 
-Serve the built frontend from a static host or same origin; configure `VITE_API_BASE_URL` for split hosting. Run Django behind HTTPS termination, configure forwarded-protocol trust only for a proxy that overwrites the header, use PostgreSQL, and mount persistent storage at `DJANGO_MEDIA_ROOT`. Set the exact allowed host and frontend CORS origins. See [deployment checklist](08_Deployment_Readiness.md) (if present) or `DOCUMENTATION/06_Setup_and_Testing.md` for the current manual steps.
+The included Compose topology runs PostgreSQL, Django/Gunicorn, and the Nginx-served Vite SPA. The PostgreSQL named volume stores records and a shared database cache table coordinates throttling between API workers; a separate named volume persists uploads. TLS terminates at the trusted external proxy. See [deployment runbook](08_Deployment_Readiness.md) for environment, migration, cache-table, and backup steps.

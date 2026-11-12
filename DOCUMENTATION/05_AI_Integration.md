@@ -1,6 +1,6 @@
 # AI integration
 
-The citizen-only `POST /api/v1/ai/analyze/` endpoint calls Google Gemini from Django. `GEMINI_API_KEY` is server-side only; no credential is bundled with the frontend. The configured model defaults to `gemini-2.5-flash`. The request has a 10-second HTTP timeout.
+The citizen-only `POST /api/v1/ai/analyze/` endpoint calls Google Gemini from Django. `GEMINI_API_KEY` is server-side only; no credential is bundled with the frontend. The configured model defaults to `gemini-3.5-flash-lite`. The request uses a bounded 30-second timeout.
 
 The prompt requests a department code from active database departments, category, `LOW|MEDIUM|HIGH` priority, and a short summary. JSON is parsed and the department/priority/category/summary are validated. Provider details are not returned to users. Missing credentials return 503; provider, timeout, and malformed output return a generic 502. Ordinary grievance submission does not require AI.
 

@@ -15,7 +15,7 @@ erDiagram
   USER ||--o{ DEPARTMENT_ASSIGNMENT : assigned_by
   GRIEVANCE ||--o{ ACTION_TAKEN_REPORT : receives
   USER ||--o{ ACTION_TAKEN_REPORT : writes
-  GRIEVANCE ||--o| CITIZEN_FEEDBACK : receives
+  GRIEVANCE ||--o{ CITIZEN_FEEDBACK : receives
   USER ||--o{ CITIZEN_FEEDBACK : submits
   GRIEVANCE ||--o| AI_RECOMMENDATION : has
   DEPARTMENT ||--o{ AI_RECOMMENDATION : suggested
@@ -78,8 +78,9 @@ erDiagram
   }
   CITIZEN_FEEDBACK {
     bigint id PK
-    bigint grievance_id FK UK
+    bigint grievance_id FK
     bigint citizen_id FK
+    int resolution_cycle
     int rating
   }
   AI_RECOMMENDATION {
@@ -100,4 +101,4 @@ erDiagram
   }
 ```
 
-`ContactEnquiry` stores public prototype contact form entries and is independent of grievances. A `DepartmentAssignment` record is retained when reassigned; only the current record has `is_active=True`. `GrievanceHistory.is_internal` separates staff-only remarks from citizen-visible status changes/updates. Feedback rating is database constrained to 1–5.
+`ContactEnquiry` stores public prototype contact form entries and is independent of grievances. A `DepartmentAssignment` record is retained when reassigned; only the current record has `is_active=True`. `GrievanceHistory.is_internal` separates staff-only remarks from citizen-visible status changes/updates. Feedback rating is database constrained to 1–5; a uniqueness constraint permits one feedback per grievance resolution cycle. Production uses PostgreSQL for both application data and the shared Django throttle cache table.
