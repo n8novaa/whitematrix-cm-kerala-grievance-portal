@@ -250,3 +250,18 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if TRUST_PROXY_SSL
 # Email
 EMAIL_BACKEND = env('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='CM Kerala Prototype <no-reply@example.test>')
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'registration_console': {'class': 'logging.StreamHandler'},
+    },
+    'loggers': {
+        'apps.accounts.views': {
+            'handlers': ['registration_console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}

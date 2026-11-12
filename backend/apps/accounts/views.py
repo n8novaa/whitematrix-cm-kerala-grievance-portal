@@ -1,10 +1,17 @@
+import logging
+import os
+import traceback
 from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import APIException
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.throttling import ScopedRateThrottle
 from .serializers import ProfileSerializer, RegistrationSerializer
+
+
+logger = logging.getLogger(__name__)
 
 
 class RegisterView(generics.CreateAPIView):
@@ -12,6 +19,27 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = (permissions.AllowAny,)
     throttle_classes = (ScopedRateThrottle,)
     throttle_scope = 'auth'
+
+    def handle_exception(self, exc):
+        if isinstance(exc, APIException):
+            return super().handle_exception(exc)
+
+        locations = ' > '.join(
+            f'{os.path.basename(frame.filename)}:{frame.lineno}:{frame.name}'
+            for frame in traceback.extract_tb(exc.__traceback__)[-6:]
+        )
+        cause = exc.__cause__
+        sqlstate = getattr(cause, 'sqlstate', None) or getattr(cause, 'pgcode', None)
+        logger.error(
+            'Unhandled registration failure; exception_type=%s sqlstate=%s locations=%s',
+            type(exc).__name__,
+            sqlstate or 'n/a',
+            locations or 'unavailable',
+        )
+        return Response(
+            {'detail': 'Registration could not be completed. Please try again.'},
+            status=500,
+        )
 
 
 class LoginView(TokenObtainPairView):

@@ -1,5 +1,6 @@
 import re
 from django.contrib.auth import password_validation
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 from .models import User
 
@@ -22,6 +23,12 @@ class RegistrationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Enter a valid mobile number with 7 to 15 digits.')
         return normalized
 
+    def validate_email(self, value):
+        normalized = value.strip().lower()
+        if User.objects.filter(email__iexact=normalized).exists():
+            raise serializers.ValidationError('A user with this email address already exists.')
+        return normalized
+
     def validate(self, attrs):
         if attrs['password'] != attrs['confirm_password']:
             raise serializers.ValidationError({'confirm_password': 'Passwords do not match.'})
@@ -29,7 +36,15 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop('confirm_password')
-        return User.objects.create_user(**validated_data, role=User.Role.CITIZEN)
+        try:
+            with transaction.atomic():
+                return User.objects.create_user(**validated_data, role=User.Role.CITIZEN)
+        except IntegrityError as exc:
+            if User.objects.filter(email__iexact=validated_data['email']).exists():
+                raise serializers.ValidationError({
+                    'email': 'A user with this email address already exists.',
+                }) from exc
+            raise
 
 
 class ProfileSerializer(serializers.ModelSerializer):

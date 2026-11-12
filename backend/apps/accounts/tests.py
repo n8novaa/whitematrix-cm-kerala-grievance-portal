@@ -1,13 +1,24 @@
 from rest_framework import status
 from rest_framework.test import APITestCase
 from django.core.cache import cache
+from django.core.management import call_command
+from django.db import OperationalError
+from django.test import override_settings
+from unittest.mock import patch
 from .models import User
 
 
+@override_settings(CACHES={
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache',
+    },
+})
 class AuthenticationAPITests(APITestCase):
     password = 'Valid-Password-934!'
 
     def setUp(self):
+        call_command('createcachetable', verbosity=0)
         cache.clear()
         self.user = User.objects.create_user(email='citizen@example.test', password=self.password)
 
@@ -21,6 +32,85 @@ class AuthenticationAPITests(APITestCase):
         self.assertEqual(user.role, User.Role.CITIZEN)
         self.assertEqual(user.mobile_number, '+919876543210')
         self.assertNotIn('password', response.data)
+
+    def test_registration_rejects_case_insensitive_duplicate_email(self):
+        User.objects.create_user(email='duplicate@example.test', password=self.password)
+        response = self.client.post('/api/v1/auth/register/', {
+            'email': 'Duplicate@example.test', 'password': self.password, 'confirm_password': self.password,
+            'first_name': 'Another', 'last_name': 'Citizen', 'mobile_number': '+919876543210',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+        self.assertEqual(User.objects.filter(email__iexact='duplicate@example.test').count(), 1)
+
+    def test_newly_registered_citizen_can_log_in_immediately(self):
+        response = self.client.post('/api/v1/auth/register/', {
+            'email': 'New.Login@example.test', 'password': self.password, 'confirm_password': self.password,
+            'first_name': 'New', 'last_name': 'Login', 'mobile_number': '+919876543210',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        login = self.client.post('/api/v1/auth/login/', {
+            'email': 'new.login@example.test', 'password': self.password,
+        }, format='json')
+        self.assertEqual(login.status_code, status.HTTP_200_OK, login.data)
+        self.assertTrue(login.data['access'])
+
+    @patch('apps.accounts.serializers.User.objects.create_user', side_effect=OperationalError('sensitive diagnostic text'))
+    def test_registration_database_failure_logs_sanitized_context(self, create_user):
+        payload = {
+            'email': 'private@example.test', 'password': self.password, 'confirm_password': self.password,
+            'first_name': 'Private', 'last_name': 'Citizen', 'mobile_number': '+919876543210',
+        }
+        with self.assertLogs('apps.accounts.views', level='ERROR') as captured:
+            response = self.client.post('/api/v1/auth/register/', payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertNotIn('private@example.test', '\n'.join(captured.output))
+        self.assertNotIn(self.password, '\n'.join(captured.output))
+        self.assertNotIn('sensitive diagnostic text', '\n'.join(captured.output))
+        self.assertIn('OperationalError', '\n'.join(captured.output))
+
+
+    def test_registration_and_login_work_with_database_throttle_cache(self):
+        payload = {
+            'email': 'db-cache@example.test', 'password': self.password, 'confirm_password': self.password,
+            'first_name': 'Database', 'last_name': 'Cache', 'mobile_number': '+919876543210',
+        }
+        response = self.client.post('/api/v1/auth/register/', payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        login = self.client.post('/api/v1/auth/login/', {
+            'email': payload['email'], 'password': self.password,
+        }, format='json')
+        self.assertEqual(login.status_code, status.HTTP_200_OK, login.data)
+
+    @override_settings(CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'missing_django_cache',
+        },
+    })
+    def test_health_check_reports_missing_database_cache_table(self):
+        response = self.client.get('/health/')
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.json(), {'status': 'unavailable'})
+
+    @override_settings(CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'missing_registration_cache',
+        },
+    })
+    def test_registration_throttle_fails_closed_and_logs_safely_without_cache_table(self):
+        payload = {
+            'email': 'missing-cache@example.test', 'password': self.password, 'confirm_password': self.password,
+            'first_name': 'Missing', 'last_name': 'Cache', 'mobile_number': '+919876543210',
+        }
+        with self.assertLogs('apps.accounts.views', level='ERROR') as captured:
+            response = self.client.post('/api/v1/auth/register/', payload, format='json')
+        log_output = '\n'.join(captured.output)
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(response.data, {'detail': 'Registration could not be completed. Please try again.'})
+        self.assertIn('OperationalError', log_output)
+        self.assertNotIn(payload['email'], log_output)
+        self.assertNotIn(self.password, log_output)
 
     def test_registration_requires_full_name_mobile_and_matching_password_confirmation(self):
         base = {'email': 'complete@example.test', 'first_name': 'Complete', 'last_name': 'Citizen', 'mobile_number': '9876543210', 'password': self.password, 'confirm_password': self.password}
