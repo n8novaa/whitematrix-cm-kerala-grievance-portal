@@ -49,11 +49,12 @@ class GrievanceHistorySerializer(serializers.ModelSerializer):
 
 
 class ActionTakenReportSerializer(serializers.ModelSerializer):
+    officer_id = serializers.IntegerField(read_only=True)
     officer_email = serializers.EmailField(source='officer.email', read_only=True)
 
     class Meta:
         model = ActionTakenReport
-        fields = ('id', 'officer_email', 'report', 'review_status', 'review_remarks', 'created_at')
+        fields = ('id', 'officer_id', 'officer_email', 'report', 'review_status', 'review_remarks', 'created_at')
         read_only_fields = fields
 
 

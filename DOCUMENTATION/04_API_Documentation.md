@@ -27,7 +27,7 @@ Registration requires `email`, `password`, `confirm_password`, `first_name`, `la
 - `POST /grievances/`: citizen create; district, category, subject, description, optional safe attachments. Optional `ai_recommendation_token` must be valid, unexpired, and bound to the exact description. Returns the generated `CMK-YYYY-{32 hex}` reference.
 - `GET /grievances/`, `GET /grievances/{id}/`: owner-only citizen records.
 - `GET /grievances/track/{reference}/`: public and throttled; shows status and public history only.
-- `GET /grievances/{id}/attachments/{attachment_id}/`: owner, active assigned officer, or CMO only.
+- `GET /grievances/{id}/attachments/{attachment_id}/`: owner, officer in the grievance's active assigned department, or CMO only.
 - `POST /grievances/{id}/reopen/`: owning citizen; `{ "remarks": "..." }`; resolved cases only.
 - `POST /grievances/{id}/feedback/`: owning citizen; resolved case only; `{ "rating": 1..5, "comments": "..." }`; one per resolution cycle (cycle increments on each resolution).
 
@@ -39,13 +39,13 @@ Registration requires `email`, `password`, `confirm_password`, `first_name`, `la
 - `POST /grievances/{id}/ai-recommendation/decision/`: `{ "decision": "ACCEPTED" }` or `{ "decision": "OVERRIDDEN", "department_id": 1, "category": "Roads", "priority": "HIGH" }`.
 - `POST /grievances/{id}/escalations/`, `GET /grievances/{id}/escalations/`: CMO-only; create with `{ "reason": "at least 10 characters" }`, list audit records.
 - `POST /grievances/action-reports/{report_id}/review/`: `{ "decision": "ACCEPTED"|"RETURNED", "remarks": "..." }`.
-- `POST /grievances/{id}/resolve/`: CMO-only; requires an accepted action report; `{ "remarks": "citizen-visible resolution note" }`.
+- `POST /grievances/{id}/resolve/`: CMO-only; requires the latest report to be accepted and submitted by the current assignment's officer after that assignment; after reopening, the report must also postdate the reopen event; `{ "remarks": "citizen-visible resolution note" }`.
 - `GET /dashboard/cmo/statistics/`: counts by status, department, and district, plus total, pending, resolved, overdue.
 
 ## Officer operations
 
-- `GET /grievances/officer/queue/`: only currently assigned cases.
-- `POST /grievances/{id}/updates/`: assigned officer or CMO; `{ "remarks": "...", "is_public": false }`. Defaults to internal. Set `is_public: true` for citizen-visible content.
-- `POST /grievances/{id}/action-reports/`: active assigned officer; `{ "report": "at least 10 characters" }`; creates a pending CMO review report.
+- `GET /grievances/officer/queue/`: active cases forwarded to the authenticated officer's department; officers in other departments cannot access them.
+- `POST /grievances/{id}/updates/`: officer in the active assigned department or CMO; `{ "remarks": "...", "is_public": false }`. Defaults to internal. Set `is_public: true` for citizen-visible content. A department officer's first update after CMO review advances `UNDER_REVIEW` to `IN_PROGRESS`; officers cannot act on `SUBMITTED` or `REOPENED` cases before CMO review.
+- `POST /grievances/{id}/action-reports/`: officer in the active assigned department, only while `IN_PROGRESS`; `{ "report": "at least 10 characters" }`; creates a pending CMO review report.
 
 CMO and officer serializers contain internal information according to their role. Citizen and tracking serializers omit internal notes, assignments, AI review fields, action reports and feedback belonging to other citizens. Errors use standard DRF response bodies. See tests for executable examples and authorization details.

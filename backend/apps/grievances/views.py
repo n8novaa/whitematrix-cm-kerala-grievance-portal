@@ -29,7 +29,7 @@ def transition(grievance, new_status, actor, remarks='', internal=False):
     previous = grievance.status
     grievance.status = new_status
     grievance.save(update_fields=('status', 'updated_at'))
-    GrievanceHistory.objects.create(grievance=grievance, previous_status=previous, new_status=new_status, responsible_user=actor, remarks=remarks, is_internal=internal)
+    return GrievanceHistory.objects.create(grievance=grievance, previous_status=previous, new_status=new_status, responsible_user=actor, remarks=remarks, is_internal=internal)
 
 
 class CitizenGrievanceListCreateView(generics.ListCreateAPIView):
@@ -182,7 +182,7 @@ class AIRecommendationDecisionView(APIView):
             grievance = get_object_or_404(Grievance.objects.select_for_update(), pk=pk)
             if grievance.status == Grievance.Status.RESOLVED:
                 raise serializers.ValidationError({'status': 'Resolved grievances cannot update AI decisions.'})
-            recommendation = get_object_or_404(AIRecommendation.objects.select_for_update().select_related('department'), grievance=grievance)
+            recommendation = get_object_or_404(AIRecommendation.objects.select_for_update(of=('self',)).select_related('department'), grievance=grievance)
             if recommendation.decision != AIRecommendation.Decision.PENDING:
                 raise serializers.ValidationError({'decision': 'This recommendation has already been reviewed.'})
             if data['decision'] == 'ACCEPTED':
@@ -255,7 +255,7 @@ class OfficerQueueView(generics.ListAPIView):
 
 
 class ActionReportInputSerializer(serializers.Serializer):
-    report = serializers.CharField(min_length=10)
+    report = serializers.CharField(min_length=10, trim_whitespace=True)
 
 
 class ResolutionInputSerializer(serializers.Serializer):
@@ -293,8 +293,8 @@ class SubmitActionReportView(APIView):
                     assignments__department_id=request.user.department_id,
                     assignments__is_active=True,
                 )
-                if grievance.status == Grievance.Status.RESOLVED:
-                    raise serializers.ValidationError({'status': 'Resolved grievances cannot receive new reports.'})
+                if grievance.status != Grievance.Status.IN_PROGRESS:
+                    raise serializers.ValidationError({'status': 'The grievance must be In Progress before submitting an action report.'})
                 if grievance.action_reports.filter(review_status=ActionTakenReport.ReviewStatus.PENDING).exists():
                     return Response({'detail': 'A pending action report already exists for this grievance.'}, status=409)
                 report = ActionTakenReport.objects.create(grievance=grievance, officer=request.user, report=serializer.validated_data['report'])
@@ -318,14 +318,19 @@ class OfficerProgressUpdateView(APIView):
             grievance = get_object_or_404(grievance_qs, pk=pk)
             if grievance.status == Grievance.Status.RESOLVED:
                 raise serializers.ValidationError({'status': 'Resolved grievances cannot receive progress updates.'})
-            history = GrievanceHistory.objects.create(
-                grievance=grievance,
-                previous_status=grievance.status,
-                new_status=grievance.status,
-                responsible_user=request.user,
-                remarks=remarks,
-                is_internal=not is_public,
-            )
+            if request.user.role == User.Role.OFFICER and grievance.status == Grievance.Status.UNDER_REVIEW:
+                history = transition(grievance, Grievance.Status.IN_PROGRESS, request.user, remarks, internal=not is_public)
+            else:
+                if request.user.role == User.Role.OFFICER and grievance.status != Grievance.Status.IN_PROGRESS:
+                    raise serializers.ValidationError({'status': 'The CMO must review the grievance before officer work can begin.'})
+                history = GrievanceHistory.objects.create(
+                    grievance=grievance,
+                    previous_status=grievance.status,
+                    new_status=grievance.status,
+                    responsible_user=request.user,
+                    remarks=remarks,
+                    is_internal=not is_public,
+                )
         return Response({'id': history.pk, 'created_at': history.created_at}, status=201)
 
 
@@ -341,10 +346,16 @@ class CMOResolveView(APIView):
             if not latest_report or latest_report.review_status != ActionTakenReport.ReviewStatus.ACCEPTED:
                 message = 'An accepted action report is required.' if latest_report is None else 'The latest action report must be accepted before resolution.'
                 return Response({'detail': message}, status=400)
+            current_assignment = grievance.assignments.filter(is_active=True).select_related('officer').order_by('-assigned_at', '-pk').first()
+            if (
+                not current_assignment
+                or latest_report.officer_id != current_assignment.officer_id
+                or latest_report.created_at <= current_assignment.assigned_at
+            ):
+                return Response({'detail': 'The latest accepted action report must be submitted by the currently assigned officer after assignment.'}, status=400)
             latest_reopen = grievance.history.filter(new_status=Grievance.Status.REOPENED).order_by('-created_at', '-pk').first()
             if latest_reopen:
-                current_assignment = grievance.assignments.filter(is_active=True).select_related('officer').order_by('-assigned_at', '-pk').first()
-                if latest_report.created_at <= latest_reopen.created_at or not current_assignment or latest_report.officer_id != current_assignment.officer_id:
+                if latest_report.created_at <= latest_reopen.created_at:
                     return Response({'detail': 'After reopening, the currently assigned officer must submit a new action report and have it accepted before resolution.'}, status=400)
             transition(grievance, Grievance.Status.RESOLVED, request.user, serializer.validated_data['remarks'], internal=False)
         return Response(GrievanceSerializer(grievance, context={'request': request}).data)
