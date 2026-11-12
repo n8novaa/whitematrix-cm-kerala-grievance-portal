@@ -74,7 +74,7 @@ class AttachmentDownloadView(APIView):
         grievance = get_object_or_404(Grievance, pk=grievance_id)
         if request.user.role == 'CITIZEN' and grievance.citizen_id != request.user.pk:
             raise PermissionDenied()
-        if request.user.role == 'OFFICER' and not grievance.assignments.filter(officer=request.user, is_active=True).exists():
+        if request.user.role == 'OFFICER' and not grievance.assignments.filter(department_id=request.user.department_id, is_active=True).exists():
             raise PermissionDenied()
         if request.user.role not in ('CITIZEN', 'CMO', 'OFFICER'):
             raise PermissionDenied()
@@ -249,7 +249,9 @@ class OfficerQueueView(generics.ListAPIView):
     serializer_class = GrievanceSerializer
 
     def get_queryset(self):
-        return Grievance.objects.filter(assignments__officer=self.request.user, assignments__is_active=True).select_related('department').prefetch_related('history', 'attachments', 'action_reports__officer').distinct()
+        if not self.request.user.department_id:
+            return Grievance.objects.none()
+        return Grievance.objects.filter(assignments__department_id=self.request.user.department_id, assignments__is_active=True).select_related('department').prefetch_related('history', 'attachments', 'action_reports__officer').distinct()
 
 
 class ActionReportInputSerializer(serializers.Serializer):
@@ -288,7 +290,7 @@ class SubmitActionReportView(APIView):
                 grievance = get_object_or_404(
                     Grievance.objects.select_for_update(),
                     pk=pk,
-                    assignments__officer=request.user,
+                    assignments__department_id=request.user.department_id,
                     assignments__is_active=True,
                 )
                 if grievance.status == Grievance.Status.RESOLVED:
@@ -312,7 +314,7 @@ class OfficerProgressUpdateView(APIView):
         with transaction.atomic():
             grievance_qs = Grievance.objects.select_for_update()
             if request.user.role == User.Role.OFFICER:
-                grievance_qs = grievance_qs.filter(assignments__officer=request.user, assignments__is_active=True)
+                grievance_qs = grievance_qs.filter(assignments__department_id=request.user.department_id, assignments__is_active=True)
             grievance = get_object_or_404(grievance_qs, pk=pk)
             if grievance.status == Grievance.Status.RESOLVED:
                 raise serializers.ValidationError({'status': 'Resolved grievances cannot receive progress updates.'})

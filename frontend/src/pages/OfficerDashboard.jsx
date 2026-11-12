@@ -89,11 +89,11 @@ export default function OfficerDashboard() {
   }, [load])
   const current = items.find((item) => String(item.id) === selected)
   return <div className="workspace-wrap">
-    <PageIntro eyebrow="Department officer workspace" title="Assigned grievances" actions={<button className="button button-outline button-small" onClick={load}>Refresh queue</button>}>Record investigation progress and submit an action-taken report for CMO review.</PageIntro>
+    <PageIntro eyebrow="Department officer workspace" title="Department grievance queue" actions={<button className="button button-outline button-small" onClick={load}>Refresh queue</button>}>Review cases forwarded to your department, record investigation progress, and submit action-taken reports for CMO review.</PageIntro>
     {error && <Notice kind="error">{error}</Notice>}
     <div className="officer-workspace">
-      <aside className="case-list"><div className="case-list-heading"><h2>My queue</h2><span>{items.length}</span></div>
-        {loading ? <div className="loading-list"><span /><span /><span /></div> : items.length === 0 ? <div className="empty-state"><h3>Queue is clear</h3><p>No grievances are assigned to your account.</p></div> : items.map((item) => <button className={`case-list-item ${String(item.id) === selected ? 'selected' : ''}`} key={item.id} onClick={() => setSelected(String(item.id))}><span className="case-reference">{item.reference_number}</span><strong>{item.subject}</strong><small>{item.district || 'District not set'} · {item.category}</small><span className={`status-pill status-${item.status.toLowerCase()}`}>{titleCase(item.status)}</span></button>)}
+      <aside className="case-list"><div className="case-list-heading"><h2>Department queue</h2><span>{items.length}</span></div>
+        {loading ? <div className="loading-list"><span /><span /><span /></div> : items.length === 0 ? <div className="empty-state"><h3>Queue is clear</h3><p>No grievances are currently assigned to your department.</p></div> : items.map((item) => <button className={`case-list-item ${String(item.id) === selected ? 'selected' : ''}`} key={item.id} onClick={() => setSelected(String(item.id))}><span className="case-reference">{item.reference_number}</span><strong>{item.subject}</strong><small>{item.district || 'District not set'} · {item.category}</small><span className={`status-pill status-${item.status.toLowerCase()}`}>{titleCase(item.status)}</span></button>)}
       </aside>
       <div className="case-detail-area">{current ? <OfficerCase key={current.id} grievance={current} onUpdated={load} /> : <div className="empty-state"><span className="empty-icon">↖</span><h3>Select a grievance</h3><p>Choose a case from your assigned queue to review its details.</p></div>}</div>
     </div>

@@ -97,7 +97,7 @@ class GrievanceSerializer(serializers.ModelSerializer):
             return []
         reports = obj.action_reports.all()
         if request.user.role == 'OFFICER':
-            reports = reports.filter(officer=request.user)
+            reports = reports.filter(officer__department_id=request.user.department_id)
         return ActionTakenReportSerializer(reports.order_by('created_at'), many=True).data
 
     def get_assignment(self, obj):
@@ -106,7 +106,7 @@ class GrievanceSerializer(serializers.ModelSerializer):
             return None
         assignments = DepartmentAssignment.objects.filter(grievance=obj, is_active=True).select_related('department', 'officer')
         if request.user.role == 'OFFICER':
-            assignments = assignments.filter(officer=request.user)
+            assignments = assignments.filter(department_id=request.user.department_id)
         assignment = assignments.order_by('-assigned_at', '-pk').first()
         if not assignment:
             return None
