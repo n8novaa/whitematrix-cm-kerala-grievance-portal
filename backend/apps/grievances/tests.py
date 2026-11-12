@@ -642,15 +642,40 @@ class CitizenGrievanceAPITests(APITestCase):
         self.assertEqual(tracked.data['status'], 'RESOLVED')
 
     def test_resolved_grievance_rejects_reassignment_and_officer_updates(self):
-        grievance = Grievance.objects.create(citizen=self.citizen, status=Grievance.Status.RESOLVED, **self.payload())
-        department = Department.objects.create(name='Public Works', code='PWD4', description='Roads')
-        officer = User.objects.create_user(email='resolved-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=department)
+        previous_department = Department.objects.create(name='Public Works', code='PWD4', description='Roads')
+        requested_department = Department.objects.create(name='Health', code='PWD4-HEALTH', description='Health services')
+        previous_officer = User.objects.create_user(email='previous-resolved-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=previous_department)
+        requested_officer = User.objects.create_user(email='requested-resolved-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=requested_department)
         cmo = User.objects.create_user(email='resolved-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        grievance = Grievance.objects.create(citizen=self.citizen, status=Grievance.Status.RESOLVED, department=previous_department, **self.payload())
+        active_assignment = DepartmentAssignment.objects.create(grievance=grievance, department=previous_department, officer=previous_officer, assigned_by=cmo)
+        GrievanceHistory.objects.create(
+            grievance=grievance,
+            previous_status=Grievance.Status.IN_PROGRESS,
+            new_status=Grievance.Status.RESOLVED,
+            responsible_user=cmo,
+            remarks='The accepted response resolved the grievance.',
+        )
+        original_history_count = grievance.history.count()
         self.client.force_authenticate(cmo)
-        rejected = self.client.post(f'/api/v1/grievances/{grievance.pk}/assign/', {'department_id': department.pk, 'officer_id': officer.pk})
-        self.assertEqual(rejected.status_code, 400)
-        DepartmentAssignment.objects.create(grievance=grievance, department=department, officer=officer, assigned_by=cmo)
-        self.client.force_authenticate(officer)
+        rejected = self.client.post(f'/api/v1/grievances/{grievance.pk}/assign/', {'department_id': requested_department.pk, 'officer_id': requested_officer.pk})
+        self.assertEqual(rejected.status_code, 400, rejected.data)
+        grievance.refresh_from_db()
+        active_assignment.refresh_from_db()
+        self.assertEqual(grievance.status, Grievance.Status.RESOLVED)
+        self.assertEqual(grievance.department_id, previous_department.pk)
+        self.assertTrue(active_assignment.is_active)
+        self.assertEqual(grievance.assignments.count(), 1)
+        self.assertEqual(grievance.history.count(), original_history_count)
+        self.assertFalse(grievance.assignments.filter(officer=requested_officer).exists())
+
+        self.client.force_authenticate(self.citizen)
+        citizen_detail = self.client.get(f'/api/v1/grievances/{grievance.pk}/')
+        self.assertEqual(citizen_detail.status_code, 200, citizen_detail.data)
+        self.assertEqual(citizen_detail.data['status'], Grievance.Status.RESOLVED)
+        self.assertEqual(citizen_detail.data['department_name'], previous_department.name)
+
+        self.client.force_authenticate(previous_officer)
         update = self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Late update attempt after resolution.'})
         report = self.client.post(f'/api/v1/grievances/{grievance.pk}/action-reports/', {'report': 'Late action report attempt.'})
         self.assertEqual(update.status_code, 400)
