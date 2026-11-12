@@ -1,38 +1,36 @@
 # System architecture
 
-The browser application sends JSON or multipart requests to the Django API. The API owns authentication, role checks, status transitions, persistence, attachment authorization, throttling, and calls to Gemini. Gemini credentials remain on the server. Static admin assets are collected and served by WhiteNoise; uploaded files are served only through the authenticated attachment endpoint.
+## Request path
 
-```mermaid
-flowchart LR
-  Citizen[Citizen browser]
-  CMO[CMO browser]
-  Officer[Officer browser]
-  UI[React + Vite frontend]
-  API[Django REST API]
-  DB[(PostgreSQL in deployment / SQLite locally)]
-  Cache[(Shared PostgreSQL cache table in deployment)]
-  Media[(Persistent media volume required)]
-  Gemini[Google Gemini API]
-  Static[WhiteNoise static assets]
-  Citizen --> UI
-  CMO --> UI
-  Officer --> UI
-  UI -->|JWT JSON / multipart| API
-  API --> DB
-  API --> Cache
-  API --> Media
-  API -->|advisory analysis only| Gemini
-  API --> Static
-```
+The browser runs the React/Vite single-page application. It calls versioned Django REST endpoints with JSON or multipart requests. Django validates input, applies JWT authentication and role/object permissions, writes relational records, and stores files on its configured filesystem. When AI analysis is requested and a server-side Gemini key is configured, Django calls Gemini and validates the structured response.
 
-## Trust boundaries
+![System architecture](diagrams/system_architecture.png)
 
-- Public registration always creates a citizen. Elevated roles are provisioned by an operator.
-- Citizen records are owner-filtered. Officer queries require an active assignment. CMO-only operations use backend role permissions.
-- Public tracking is keyed by a random reference and throttled. It omits description, files, feedback, assignment details, and internal remarks.
-- Uploaded files are size/extension/signature checked and downloaded only after role/object authorization.
-- AI output is parsed and allowlist-validated. A signed, time-limited recommendation token is bound to the exact description when attached at grievance creation. It is not applied to official fields without an audited CMO decision.
+## Components
 
-## Deployment topology
+| Component | Responsibility | Implementation |
+|---|---|---|
+| Web client | Public pages and citizen, CMO, officer screens | React + Vite; `frontend/src` |
+| API | Auth, validation, authorization, workflow and persistence | Django + DRF; `backend/apps` |
+| JWT | Access and refresh tokens; refresh rotation and blacklist | SimpleJWT; client keeps both tokens in tab-scoped `sessionStorage` |
+| Database | Users, departments, grievances and audit/workflow records | SQLite locally when no `DATABASE_URL`; PostgreSQL on deployment |
+| File storage | Attachments | Django filesystem storage; authorized download endpoint |
+| Static files | Django admin/static assets | `collectstatic` + WhiteNoise |
+| AI provider | Optional complaint analysis | Google Gemini called server-side; key never belongs in frontend config |
+| Hosting | Assessment target | Vercel (frontend), Render (API), Neon (PostgreSQL) |
 
-The included Compose topology runs PostgreSQL, Django/Gunicorn, and the Nginx-served Vite SPA. The PostgreSQL named volume stores records and a shared database cache table coordinates throttling between API workers; a separate named volume persists uploads. TLS terminates at the trusted external proxy. See [deployment runbook](08_Deployment_Readiness.md) for environment, migration, cache-table, and backup steps.
+The repository also contains `compose.yaml` for a self-hosted Docker Compose topology. It is separate from the Render/Vercel deployment and uses PostgreSQL plus a named media volume.
+
+## Trust and workflow boundaries
+
+- Registration always creates a citizen; staff accounts are provisioned by an administrator.
+- Citizens can access only their own grievance records. Public tracking uses the high-entropy reference and a restricted serializer.
+- CMO endpoints use CMO role permissions. Officer queue, updates, reports and attachment access are scoped to the active assignment’s department.
+- Assignment history records selected department, selected officer, assigning CMO, remarks and time; reassignment deactivates the old record rather than deleting it.
+- Resolution requires the latest action report to be accepted and submitted by the officer on the current assignment after assignment. Reopened cases require a new report after reopening.
+- Internal history and remarks are withheld from citizen serializers/tracking.
+- Gemini results remain suggestions. A CMO decision is required to change official values.
+
+## Deployment notes
+
+Render terminates TLS and Django can trust the forwarded HTTPS protocol when `TRUST_PROXY_SSL_HEADER=True`. CORS and CSRF origins must be exact HTTPS frontend origins. The Render media path in the deployment guide is ephemeral; attachments may disappear after restart/redeploy. Render free web services can sleep while idle. Neon stores database rows separately. See [setup and deployment](06_Setup_and_Testing.md).

@@ -2,6 +2,8 @@
 
 Base path: `/api/v1/`. Unless marked public, requests require `Authorization: Bearer <access-token>`. JSON endpoints use `Content-Type: application/json`; grievance creation can use multipart form data with repeated `attachments` fields. Timestamps are ISO 8601.
 
+Routes are registered in `backend/config/urls.py` and app `urls.py` files. Views and serializers are authoritative if this guide drifts. DRF validation commonly returns 400, authentication returns 401, role/object denials return 403 or 404, and duplicate pending reports return 409.
+
 `GET /health/` is a deployment health endpoint. It returns 200 only when Django can reach its database and configured cache.
 
 ## Authentication
@@ -20,7 +22,7 @@ Registration requires `email`, `password`, `confirm_password`, `first_name`, `la
 
 - `GET /departments/`, `GET /departments/{id}/`: active department directory (public).
 - `GET /departments/{id}/officers/`: CMO-only officer list.
-- `POST /ai/analyze/`: citizen-only and throttled. Body: `{ "description": "..." }`. Returns advisory department code, category, priority, summary, model name, and a short-lived signed recommendation token. AI failures return a generic 502; missing key returns 503.
+- `POST /ai/analyze/`: citizen-only and throttled. Body: `{ "description": "..." }`; optional `grievance_id` is allowed only for a grievance owned by the caller and requires exact description match. Returns advisory department code, category, priority, summary, model name, and a short-lived signed recommendation token. AI failures return a generic 502; missing key returns 503.
 
 ## Grievances
 
@@ -47,5 +49,44 @@ Registration requires `email`, `password`, `confirm_password`, `first_name`, `la
 - `GET /grievances/officer/queue/`: active cases forwarded to the authenticated officer's department; officers in other departments cannot access them.
 - `POST /grievances/{id}/updates/`: officer in the active assigned department or CMO; `{ "remarks": "...", "is_public": false }`. Defaults to internal. Set `is_public: true` for citizen-visible content. A department officer's first update after CMO review advances `UNDER_REVIEW` to `IN_PROGRESS`; officers cannot act on `SUBMITTED` or `REOPENED` cases before CMO review.
 - `POST /grievances/{id}/action-reports/`: officer in the active assigned department, only while `IN_PROGRESS`; `{ "report": "at least 10 characters" }`; creates a pending CMO review report.
+
+Action reports are submitted as text; the current endpoint does not accept a report-file upload.
+
+## Public contact
+
+- `POST /grievances/contact-enquiries/`: public form submission with `name`, `email`, `subject`, and `message`; persists a `ContactEnquiry`.
+
+## Example requests
+
+Citizen registration:
+
+```http
+POST /api/v1/auth/register/
+Content-Type: application/json
+```
+
+```json
+{"email":"citizen@example.test","password":"<operator-chosen-password>","confirm_password":"<same-password>","first_name":"Asha","last_name":"Example","mobile_number":"+919876543210"}
+```
+
+Grievance submission (JSON without attachments):
+
+```http
+POST /api/v1/grievances/
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{"district":"Malappuram","category":"Roads","subject":"Pothole near the bus stop","description":"A large pothole is creating a hazard near the bus stop."}
+```
+
+The response is the grievance representation, including generated `reference_number`, current `status`, and history. Assignment example:
+
+```json
+{"department_id":1,"officer_id":2,"remarks":"Inspect the reported road damage."}
+```
+
+Responses are role-scoped; do not assume every field in the full grievance representation is exposed to citizens or public tracking.
 
 CMO and officer serializers contain internal information according to their role. Citizen and tracking serializers omit internal notes, assignments, AI review fields, action reports and feedback belonging to other citizens. Errors use standard DRF response bodies. See tests for executable examples and authorization details.
