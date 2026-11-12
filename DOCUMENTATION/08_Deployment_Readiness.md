@@ -57,5 +57,5 @@ Before public launch, exercise registration, citizen submission/tracking, author
 ## Current verification limits
 
 - No Docker executable, hosting account, public domain, TLS proxy, PostgreSQL host, persistent volume, or production Gemini credential was available in this workspace. Compose images and hosted flows therefore remain unverified here.
-- JWT tokens are stored in browser localStorage. Review and harden the browser token storage threat model before exposing real user data publicly.
+- JWT tokens are stored in per-tab sessionStorage to isolate browser tabs. JavaScript can still access these tokens, so review and harden the XSS/token-storage threat model before exposing real user data publicly.
 - Live Gemini integration cannot be claimed successful until a provider request succeeds with the operator's credential.

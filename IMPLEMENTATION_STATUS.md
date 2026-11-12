@@ -23,4 +23,4 @@ Last updated: 12 November 2026
 - Configure provider/domain/DNS/TLS, real production secrets, PostgreSQL and persistent storage; build and run Compose on a Docker host.
 - Verify backups/restores and perform hosted citizen → CMO → officer → CMO → citizen and authorized attachment workflows.
 - Verify live Gemini using an operator-provided key if needed; provider tests in this workspace are mocked.
-- Review JWT localStorage exposure and XSS hardening before processing real user data.
+- JWT tokens are isolated per tab in sessionStorage; XSS hardening remains necessary before processing real user data.

@@ -24,4 +24,4 @@ The app supports citizen, CMO, and officer workflows, including reopened grievan
 - Supply real secrets and exact host/CORS/CSRF origins using a secret manager or ignored `.env.production`.
 - Test the full HTTPS deployment and attachment persistence. Provision CMO/officer accounts through a trusted administrative process.
 - Supply a Gemini key and verify a live provider request if AI is required; local tests mock provider responses.
-- JWT tokens remain in browser localStorage. Review the XSS/token-storage threat model before handling real user data.
+- JWT tokens are stored in per-tab sessionStorage to isolate tab sessions. Review the XSS/token-storage threat model before handling real user data.

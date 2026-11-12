@@ -1,3 +1,5 @@
+import { getAccessToken, getRefreshToken, updateAccessToken, updateRefreshToken } from './auth-storage'
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const RETRYABLE_STATUSES = new Set([502, 503, 504])
 
@@ -45,7 +47,7 @@ function errorMessage(data) {
 }
 
 async function refreshAccessToken() {
-  const refresh = localStorage.getItem('refreshToken')
+  const refresh = getRefreshToken()
   if (!refresh) return null
   const response = await fetchWithWarmupRetry(`${API_BASE}/api/v1/auth/refresh/`, {
     method: 'POST',
@@ -54,23 +56,29 @@ async function refreshAccessToken() {
   })
   if (!response.ok) return null
   const tokens = await response.json()
-  localStorage.setItem('accessToken', tokens.access)
-  if (tokens.refresh) localStorage.setItem('refreshToken', tokens.refresh)
+  updateAccessToken(tokens.access)
+  if (tokens.refresh) updateRefreshToken(tokens.refresh)
   return tokens.access
 }
 
 export async function api(path, options = {}, retry = true) {
-  const token = localStorage.getItem('accessToken')
+  const tokenEndpoint = ['/auth/login/', '/auth/register/', '/auth/refresh/'].some((endpoint) => path.includes(endpoint))
+  const token = tokenEndpoint ? null : getAccessToken()
   const headers = new Headers(options.headers || {})
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   const response = await fetchWithWarmupRetry(`${API_BASE}/api/v1${path}`, { ...options, headers })
-  const tokenEndpoint = path.includes('/auth/login/') || path.includes('/auth/refresh/')
   if (response.status === 401 && retry && !tokenEndpoint) {
     const refreshed = await refreshAccessToken()
-    if (refreshed) return api(path, options, false)
+    if (refreshed) {
+      if (path.includes('/auth/logout/') && options.body) {
+        const payload = JSON.parse(options.body)
+        return api(path, { ...options, body: JSON.stringify({ ...payload, refresh: getRefreshToken() }) }, false)
+      }
+      return api(path, options, false)
+    }
   }
   if (response.status === 204) return null
   const contentType = response.headers.get('content-type') || ''
