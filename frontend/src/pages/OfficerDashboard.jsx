@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, downloadGrievanceAttachment, jsonRequest } from '../api'
 import { Notice, PageIntro } from '../components/Layout'
 import { Timeline } from './PublicPages'
@@ -52,21 +52,41 @@ export default function OfficerDashboard() {
   const [selected, setSelected] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  async function load() {
-    setLoading(true); setError('')
+  const refreshInProgress = useRef(false)
+  const load = useCallback(async (showLoading = true) => {
+    if (refreshInProgress.current) return
+    refreshInProgress.current = true
+    if (showLoading) setLoading(true)
+    setError('')
     try {
       const queue = await api('/grievances/officer/queue/')
       setItems(queue)
       setSelected((current) => current && queue.some((item) => String(item.id) === current) ? current : queue[0] ? String(queue[0].id) : '')
     } catch (err) { setError(err.message) }
-    finally { setLoading(false) }
-  }
-  useEffect(() => {
-    api('/grievances/officer/queue/')
-      .then((queue) => { setItems(queue); setSelected(queue[0] ? String(queue[0].id) : '') })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
+    finally {
+      refreshInProgress.current = false
+      if (showLoading) setLoading(false)
+    }
   }, [])
+  useEffect(() => {
+    const initialRefreshTimeout = window.setTimeout(() => load(), 0)
+    let focusRefreshTimeout
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      window.clearTimeout(focusRefreshTimeout)
+      focusRefreshTimeout = window.setTimeout(() => load(false), 150)
+    }
+    const interval = window.setInterval(refreshWhenVisible, 30_000)
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearInterval(interval)
+      window.clearTimeout(initialRefreshTimeout)
+      window.clearTimeout(focusRefreshTimeout)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [load])
   const current = items.find((item) => String(item.id) === selected)
   return <div className="workspace-wrap">
     <PageIntro eyebrow="Department officer workspace" title="Assigned grievances" actions={<button className="button button-outline button-small" onClick={load}>Refresh queue</button>}>Record investigation progress and submit an action-taken report for CMO review.</PageIntro>

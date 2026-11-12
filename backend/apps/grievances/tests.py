@@ -270,7 +270,14 @@ class CitizenGrievanceAPITests(APITestCase):
         department = Department.objects.create(name='Health', code='ATCH', description='Health')
         officer = User.objects.create_user(email='attachment-officer@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=department)
         cmo = User.objects.create_user(email='attachment-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
-        DepartmentAssignment.objects.create(grievance=grievance, department=department, officer=officer, assigned_by=cmo)
+        self.client.force_authenticate(cmo)
+        reviewed = self.client.post(f'/api/v1/grievances/{grievance.pk}/cmo/review/', {'remarks': 'Initial review started.'})
+        self.assertEqual(reviewed.status_code, 200, reviewed.data)
+        assigned = self.client.post(
+            f'/api/v1/grievances/{grievance.pk}/assign/',
+            {'department_id': department.pk, 'officer_id': officer.pk},
+        )
+        self.assertEqual(assigned.status_code, 200, assigned.data)
         endpoint = f'/api/v1/grievances/{grievance.pk}/attachments/{attachment.pk}/'
         self.client.force_authenticate(officer)
         self.assertEqual(self.client.get(endpoint).status_code, 200)
@@ -451,6 +458,60 @@ class CitizenGrievanceAPITests(APITestCase):
         self.client.force_authenticate(first)
         self.assertEqual(self.client.get('/api/v1/grievances/officer/queue/').data, [])
         self.assertEqual(self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Old assignment access attempt'}).status_code, 404)
+
+    def test_cmo_assignment_is_visible_only_to_current_officer_and_reassignment_preserves_history(self):
+        grievance = Grievance.objects.create(citizen=self.citizen, **self.payload())
+        department = Department.objects.create(name='Public Works', code='QUEUE', description='Roads')
+        other_department = Department.objects.create(name='Health', code='QUEUE-HEALTH', description='Health')
+        first = User.objects.create_user(email='queue-first@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=department)
+        second = User.objects.create_user(email='queue-second@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=department)
+        same_department_peer = User.objects.create_user(email='queue-peer@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=department)
+        different_department = User.objects.create_user(email='queue-other-dept@example.test', password='Test-pass-994!', role=User.Role.OFFICER, department=other_department)
+        cmo = User.objects.create_user(email='queue-cmo@example.test', password='Test-pass-994!', role=User.Role.CMO)
+        self.client.force_authenticate(cmo)
+
+        reviewed = self.client.post(f'/api/v1/grievances/{grievance.pk}/cmo/review/', {'remarks': 'Initial review started.'})
+        self.assertEqual(reviewed.status_code, 200, reviewed.data)
+        assigned = self.client.post(
+            f'/api/v1/grievances/{grievance.pk}/assign/',
+            {'department_id': department.pk, 'officer_id': first.pk},
+        )
+        self.assertEqual(assigned.status_code, 200, assigned.data)
+        first_assignment = DepartmentAssignment.objects.get(grievance=grievance, is_active=True)
+        self.assertEqual((first_assignment.department_id, first_assignment.officer_id), (department.pk, first.pk))
+        self.assertEqual([item['id'] for item in self.client.get('/api/v1/grievances/cmo/queue/').data], [grievance.pk])
+
+        self.client.force_authenticate(first)
+        first_queue = self.client.get('/api/v1/grievances/officer/queue/')
+        self.assertEqual([item['id'] for item in first_queue.data], [grievance.pk])
+        self.assertEqual(first_queue.data[0]['assignment']['officer_id'], first.pk)
+        self.assertEqual(self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Assigned officer can access this case.'}).status_code, 201)
+
+        for unauthorized_officer in (same_department_peer, different_department):
+            with self.subTest(officer=unauthorized_officer.email):
+                self.client.force_authenticate(unauthorized_officer)
+                self.assertEqual(self.client.get('/api/v1/grievances/officer/queue/').data, [])
+                self.assertEqual(
+                    self.client.post(f'/api/v1/grievances/{grievance.pk}/updates/', {'remarks': 'Unauthorized access attempt.'}).status_code,
+                    404,
+                )
+
+        self.client.force_authenticate(cmo)
+        reassigned = self.client.post(
+            f'/api/v1/grievances/{grievance.pk}/assign/',
+            {'department_id': department.pk, 'officer_id': second.pk},
+        )
+        self.assertEqual(reassigned.status_code, 200, reassigned.data)
+        assignments = list(DepartmentAssignment.objects.filter(grievance=grievance).order_by('assigned_at', 'pk'))
+        self.assertEqual(len(assignments), 2)
+        self.assertEqual([assignment.is_active for assignment in assignments], [False, True])
+
+        self.client.force_authenticate(first)
+        self.assertEqual(self.client.get('/api/v1/grievances/officer/queue/').data, [])
+        self.client.force_authenticate(second)
+        second_queue = self.client.get('/api/v1/grievances/officer/queue/')
+        self.assertEqual([item['id'] for item in second_queue.data], [grievance.pk])
+        self.assertEqual(second_queue.data[0]['assignment']['officer_id'], second.pk)
 
     def test_resolved_grievance_rejects_reassignment_and_officer_updates(self):
         grievance = Grievance.objects.create(citizen=self.citizen, status=Grievance.Status.RESOLVED, **self.payload())
